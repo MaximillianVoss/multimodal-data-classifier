@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.coverage
+*.pyc
+*.pyo
+*.pyd
+project/artifacts/page_checks/
+project/artifacts/presentation_checks/
+project/artifacts/presentation_checks_fixed/
+project/artifacts/presentation_checks_final/
