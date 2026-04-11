@@ -78,7 +78,7 @@ class Settings:
 
 
 def get_settings(project_root: Path | None = None) -> Settings:
-    root = project_root or Path(__file__).resolve().parents[2]
+    root = project_root or Path(__file__).resolve().parents[1]
     settings = Settings(project_root=root)
     settings.ensure_directories()
     return settings

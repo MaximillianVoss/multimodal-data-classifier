@@ -79,7 +79,7 @@ def build_ui(service: ClassifierService) -> gr.Blocks:
         result = service.classify_image(image)
         return _result_markdown(result), result["probabilities"], _history_frame(service)
 
-    with gr.Blocks(title="Система классификации данных", theme=gr.themes.Soft()) as demo:
+    with gr.Blocks(title="Система классификации данных") as demo:
         gr.Markdown(
             """
             # Система классификации изображений и текстовых данных
@@ -136,4 +136,3 @@ def build_ui(service: ClassifierService) -> gr.Blocks:
         refresh_button.click(fn=lambda: _history_frame(service), outputs=history_table)
 
     return demo
-
