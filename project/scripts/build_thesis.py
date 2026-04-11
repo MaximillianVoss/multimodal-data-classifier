@@ -17,9 +17,8 @@ from docx.text.paragraph import Paragraph
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 WORKSPACE_DIR = PROJECT_DIR.parent
 DOCS_DIR = WORKSPACE_DIR / "docs"
-SRC_DIR = PROJECT_DIR / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+if str(PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(PROJECT_DIR))
 
 from vkr_classifier.config import get_settings  # noqa: E402
 from vkr_classifier.data.image_generator import create_shape_image  # noqa: E402
@@ -492,13 +491,13 @@ def build_document() -> Path:
         "artifacts с обученными моделями, графиками и скриншотами, а также файлы main.py и generate_assets.py для запуска приложения и пересборки артефактов.",
         "Для запуска приложения из каталога проекта используется команда python main.py. Веб-интерфейс становится доступным по адресу http://127.0.0.1:8000/ui.",
         "Для повторной генерации моделей, таблиц и графиков используется команда python generate_assets.py.",
-        "Для запуска набора автотестов применяется команда python -m pytest --cov=src/vkr_classifier --cov-report=term-missing.",
+        "Для запуска набора автотестов применяется команда python -m pytest --cov=vkr_classifier --cov-report=term-missing.",
     ]:
         document.add_paragraph(text, style=STYLE_BODY)
 
     structure_table = pd.DataFrame(
         [
-            ["src/vkr_classifier", "основные модули приложения"],
+            ["vkr_classifier", "основные модули приложения"],
             ["tests", "автоматические тесты"],
             ["artifacts/models", "сериализованные модели"],
             ["artifacts/figures", "диаграммы и графики"],

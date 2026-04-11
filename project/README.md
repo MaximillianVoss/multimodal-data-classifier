@@ -12,7 +12,7 @@
 
 ## Структура
 
-- `src/vkr_classifier` - исходный код приложения
+- `vkr_classifier` - исходный код приложения
 - `tests` - автотесты
 - `artifacts` - обученные модели, таблицы и графики для главы о тестировании
 - `scripts` - генерация диаграмм, записки и презентации
@@ -30,7 +30,7 @@ python main.py
 ## Запуск тестов
 
 ```powershell
-python -m pytest --cov=src/vkr_classifier --cov-report=term-missing
+python -m pytest --cov=vkr_classifier --cov-report=term-missing
 ```
 
 ## Генерация моделей и отчетных артефактов

@@ -7,16 +7,14 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-
 ROOT_DIR = Path(__file__).resolve().parents[1]
-SRC_DIR = ROOT_DIR / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
-from vkr_classifier.config import Settings  # noqa: E402
-from vkr_classifier.data.image_generator import create_shape_image  # noqa: E402
-from vkr_classifier.main import create_application  # noqa: E402
-from vkr_classifier.service import ClassifierService  # noqa: E402
+from vkr_classifier.config import Settings
+from vkr_classifier.data.image_generator import create_shape_image
+from vkr_classifier.main import create_application
+from vkr_classifier.service import ClassifierService
 
 
 @pytest.fixture(scope="session")
@@ -46,4 +44,3 @@ def star_image_bytes(settings: Settings) -> bytes:
     buffer = BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue()
-

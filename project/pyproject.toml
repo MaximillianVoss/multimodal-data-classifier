@@ -8,13 +8,10 @@ version = "1.0.0"
 description = "Система классификации изображений и текстовых данных для ВКР"
 requires-python = ">=3.12"
 
-[tool.setuptools]
-package-dir = {"" = "src"}
-
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]
+include = ["vkr_classifier*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-

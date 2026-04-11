@@ -14,9 +14,8 @@ from pptx.util import Inches, Pt
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 WORKSPACE_DIR = PROJECT_DIR.parent
 DOCS_DIR = WORKSPACE_DIR / "docs"
-SRC_DIR = PROJECT_DIR / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+if str(PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(PROJECT_DIR))
 
 from vkr_classifier.config import get_settings  # noqa: E402
 
