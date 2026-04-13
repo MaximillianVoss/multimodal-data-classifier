@@ -88,6 +88,19 @@ class Database:
                 (modality, model_name, model_version, accuracy, weighted_f1, artifact_path, trained_at),
             )
 
+    def replace_model_registry(self, models: list[dict[str, object]]) -> None:
+        with self._connect() as connection:
+            connection.execute("DELETE FROM model_registry")
+            connection.executemany(
+                """
+                INSERT INTO model_registry (
+                    modality, model_name, model_version, accuracy, weighted_f1, artifact_path, trained_at
+                )
+                VALUES (:modality, :model_name, :model_version, :accuracy, :weighted_f1, :artifact_path, :trained_at)
+                """,
+                models,
+            )
+
     def log_prediction(
         self,
         *,
@@ -164,4 +177,3 @@ class Database:
                 """
             ).fetchall()
         return [dict(row) for row in rows]
-

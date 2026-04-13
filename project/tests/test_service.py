@@ -27,3 +27,11 @@ def test_training_outputs_are_created(settings: Settings, service: ClassifierSer
     assert settings.image_confusion_figure.exists()
     assert settings.model_comparison_figure.exists()
 
+
+def test_model_registry_contains_only_current_models_with_relative_paths(service: ClassifierService) -> None:
+    models = service.get_models()
+    assert len(models) == 2
+
+    paths = {item["modality"]: str(item["artifact_path"]) for item in models}
+    assert paths["text"] == "artifacts/models/text_classifier.joblib"
+    assert paths["image"] == "artifacts/models/image_classifier.joblib"

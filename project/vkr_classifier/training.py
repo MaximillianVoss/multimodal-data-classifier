@@ -43,22 +43,26 @@ def generate_training_assets(
     generate_documentation_figures(settings)
     save_demo_examples(settings.demo_examples_dir, settings.image_labels, settings.image_size)
 
-    database.register_model(
-        modality="text",
-        model_name=text_artifact.model_name,
-        model_version=text_artifact.model_version,
-        accuracy=text_artifact.metrics["accuracy"],
-        weighted_f1=text_artifact.metrics["f1_score"],
-        artifact_path=str(settings.text_model_path),
-        trained_at=text_artifact.trained_at,
-    )
-    database.register_model(
-        modality="image",
-        model_name=image_artifact.model_name,
-        model_version=image_artifact.model_version,
-        accuracy=image_artifact.metrics["accuracy"],
-        weighted_f1=image_artifact.metrics["f1_score"],
-        artifact_path=str(settings.image_model_path),
-        trained_at=image_artifact.trained_at,
+    database.replace_model_registry(
+        [
+            {
+                "modality": "text",
+                "model_name": text_artifact.model_name,
+                "model_version": text_artifact.model_version,
+                "accuracy": text_artifact.metrics["accuracy"],
+                "weighted_f1": text_artifact.metrics["f1_score"],
+                "artifact_path": settings.text_model_path.relative_to(settings.project_root).as_posix(),
+                "trained_at": text_artifact.trained_at,
+            },
+            {
+                "modality": "image",
+                "model_name": image_artifact.model_name,
+                "model_version": image_artifact.model_version,
+                "accuracy": image_artifact.metrics["accuracy"],
+                "weighted_f1": image_artifact.metrics["f1_score"],
+                "artifact_path": settings.image_model_path.relative_to(settings.project_root).as_posix(),
+                "trained_at": image_artifact.trained_at,
+            },
+        ]
     )
     return text_artifact, image_artifact
