@@ -101,7 +101,7 @@ def build_ui(service: ClassifierService) -> gr.Blocks:
                     gr.Examples(examples=text_examples, inputs=text_input, label="Примеры текстов")
 
                 with gr.Tab("Классификация изображения"):
-                    image_input = gr.Image(type="pil", label="Изображение для анализа")
+                    image_input = gr.Image(type="filepath", label="Изображение для анализа")
                     image_button = gr.Button("Классифицировать изображение", variant="primary")
                     image_summary = gr.Markdown()
                     image_scores = gr.Label(label="Распределение вероятностей")

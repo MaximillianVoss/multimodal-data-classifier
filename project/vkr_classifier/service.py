@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from io import BytesIO
+from pathlib import Path
 from threading import Lock
 from time import perf_counter
 
@@ -61,6 +62,13 @@ class ClassifierService:
             for label, probability in zip(classes, scores, strict=False)
         }
 
+    @staticmethod
+    def _prepare_image(image: Image.Image | str | Path) -> Image.Image:
+        if isinstance(image, Image.Image):
+            return image
+        with Image.open(image) as source:
+            return source.copy()
+
     def classify_text(self, text: str) -> dict[str, object]:
         self._require_ready()
         if self.text_artifact is None:
@@ -97,13 +105,14 @@ class ClassifierService:
         )
         return response
 
-    def classify_image(self, image: Image.Image) -> dict[str, object]:
+    def classify_image(self, image: Image.Image | str | Path) -> dict[str, object]:
         self._require_ready()
         if self.image_artifact is None:
             raise RuntimeError("Модель изображений не инициализирована.")
 
         started = perf_counter()
-        vector = image_to_vector(image, self.image_artifact.image_size).reshape(1, -1)
+        prepared_image = self._prepare_image(image)
+        vector = image_to_vector(prepared_image, self.image_artifact.image_size).reshape(1, -1)
         probabilities = self.image_artifact.classifier.predict_proba(vector)[0]
         classes = self.image_artifact.classifier.classes_
         predicted_index = int(np.argmax(probabilities))

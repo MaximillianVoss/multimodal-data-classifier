@@ -22,6 +22,16 @@ def test_image_classification_detects_triangle(service: ClassifierService, setti
     assert float(result["confidence"]) > 0.6
 
 
+def test_image_classification_accepts_file_path(service: ClassifierService, settings: Settings) -> None:
+    image = create_shape_image("Квадрат", seed=2025, image_size=settings.image_size)
+    file_path = settings.demo_examples_dir / "test_square.png"
+    image.save(file_path)
+
+    result = service.classify_image(file_path)
+    assert result["label"] == "Квадрат"
+    assert float(result["confidence"]) > 0.6
+
+
 def test_training_outputs_are_created(settings: Settings, service: ClassifierService) -> None:
     assert settings.text_model_path.exists()
     assert settings.image_model_path.exists()
