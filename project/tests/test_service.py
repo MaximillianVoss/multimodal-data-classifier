@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from vkr_classifier.config import Settings
 from vkr_classifier.data.image_generator import create_shape_image
 from vkr_classifier.service import ClassifierService
@@ -35,3 +37,35 @@ def test_model_registry_contains_only_current_models_with_relative_paths(service
     paths = {item["modality"]: str(item["artifact_path"]) for item in models}
     assert paths["text"] == "artifacts/models/text_classifier.joblib"
     assert paths["image"] == "artifacts/models/image_classifier.joblib"
+
+
+def test_ensure_ready_does_not_reload_models_when_service_is_already_ready(
+    monkeypatch: pytest.MonkeyPatch,
+    settings: Settings,
+) -> None:
+    service = ClassifierService(settings)
+    calls = {"generate": 0, "text": 0, "image": 0}
+    text_artifact = object()
+    image_artifact = object()
+
+    def fake_generate(*args, **kwargs) -> None:
+        calls["generate"] += 1
+
+    def fake_load_text(*args, **kwargs):
+        calls["text"] += 1
+        return text_artifact
+
+    def fake_load_image(*args, **kwargs):
+        calls["image"] += 1
+        return image_artifact
+
+    monkeypatch.setattr("vkr_classifier.service.generate_training_assets", fake_generate)
+    monkeypatch.setattr("vkr_classifier.service.load_text_model", fake_load_text)
+    monkeypatch.setattr("vkr_classifier.service.load_image_model", fake_load_image)
+
+    service.ensure_ready()
+    service.ensure_ready()
+
+    assert service.text_artifact is text_artifact
+    assert service.image_artifact is image_artifact
+    assert calls == {"generate": 1, "text": 1, "image": 1}

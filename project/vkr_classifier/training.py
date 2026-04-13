@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from vkr_classifier.config import Settings
 from vkr_classifier.data.image_generator import save_demo_examples
 from vkr_classifier.database import Database
@@ -17,6 +19,45 @@ from vkr_classifier.models.text_classifier import (
     train_text_model,
 )
 from vkr_classifier.reporting import export_reports
+
+
+def _all_exist(paths: tuple[Path, ...]) -> bool:
+    return all(path.exists() for path in paths)
+
+
+def _report_assets_ready(settings: Settings) -> bool:
+    return _all_exist(
+        (
+            settings.text_metrics_path,
+            settings.image_metrics_path,
+            settings.summary_metrics_path,
+            settings.text_report_path,
+            settings.image_report_path,
+            settings.model_comparison_figure,
+            settings.text_confusion_figure,
+            settings.image_confusion_figure,
+        )
+    )
+
+
+def _documentation_figures_ready(settings: Settings) -> bool:
+    return _all_exist(
+        (
+            settings.use_case_figure,
+            settings.architecture_figure,
+            settings.database_figure,
+            settings.workflow_figure,
+            settings.interaction_figure,
+        )
+    )
+
+
+def _demo_examples_ready(settings: Settings) -> bool:
+    expected_files = tuple(
+        settings.demo_examples_dir / f"{index:02d}_{label}.png"
+        for index, label in enumerate(settings.image_labels, start=1)
+    )
+    return _all_exist(expected_files)
 
 
 def generate_training_assets(
@@ -39,9 +80,12 @@ def generate_training_assets(
     else:
         image_artifact = load_image_model(settings.image_model_path)
 
-    export_reports(settings, text_artifact, image_artifact)
-    generate_documentation_figures(settings)
-    save_demo_examples(settings.demo_examples_dir, settings.image_labels, settings.image_size)
+    if force or not _report_assets_ready(settings):
+        export_reports(settings, text_artifact, image_artifact)
+    if force or not _documentation_figures_ready(settings):
+        generate_documentation_figures(settings)
+    if force or not _demo_examples_ready(settings):
+        save_demo_examples(settings.demo_examples_dir, settings.image_labels, settings.image_size)
 
     database.replace_model_registry(
         [

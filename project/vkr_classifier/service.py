@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from io import BytesIO
+from threading import Lock
 from time import perf_counter
 
 import numpy as np
@@ -23,15 +24,22 @@ class ClassifierService:
         self.database.initialize()
         self.text_artifact: TextModelArtifact | None = None
         self.image_artifact: ImageModelArtifact | None = None
+        self._ready_lock = Lock()
 
     @property
     def is_ready(self) -> bool:
         return self.text_artifact is not None and self.image_artifact is not None
 
     def ensure_ready(self) -> None:
-        generate_training_assets(self.settings, force=False)
-        self.text_artifact = load_text_model(self.settings.text_model_path)
-        self.image_artifact = load_image_model(self.settings.image_model_path)
+        if self.is_ready:
+            return
+
+        with self._ready_lock:
+            if self.is_ready:
+                return
+            generate_training_assets(self.settings, force=False)
+            self.text_artifact = load_text_model(self.settings.text_model_path)
+            self.image_artifact = load_image_model(self.settings.image_model_path)
 
     def _require_ready(self) -> None:
         if not self.is_ready:
@@ -133,4 +141,3 @@ class ClassifierService:
     def get_models(self) -> list[dict[str, object]]:
         self._require_ready()
         return self.database.get_models()
-
