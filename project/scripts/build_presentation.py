@@ -169,6 +169,27 @@ def set_slide_number(shape, number: int) -> None:
     set_body(shape, [str(number)], font_size=14, color=TITLE_COLOR)
 
 
+def clear_shape_text(shape) -> None:
+    if hasattr(shape, "text_frame"):
+        shape.text_frame.clear()
+
+
+def clear_all_text(slide) -> None:
+    for shape in slide.shapes:
+        clear_shape_text(shape)
+
+
+def add_slide_number_box(slide, number: int) -> None:
+    textbox = slide.shapes.add_textbox(Inches(11.55), Inches(6.62), Inches(0.45), Inches(0.22))
+    text_frame = textbox.text_frame
+    text_frame.clear()
+    paragraph = text_frame.paragraphs[0]
+    paragraph.text = str(number)
+    paragraph.alignment = PP_ALIGN.RIGHT
+    for run in paragraph.runs:
+        set_text_run_style(run, size=14, color=TITLE_COLOR)
+
+
 def build_presentation() -> Path:
     settings = get_settings(PROJECT_DIR)
     summary = pd.read_csv(settings.summary_metrics_path)
@@ -177,7 +198,7 @@ def build_presentation() -> Path:
 
     presentation = Presentation(DOCS_DIR / TEMPLATE_NAME)
 
-    for index in range(len(presentation.slides) - 1, 8, -1):
+    for index in range(len(presentation.slides) - 1, 10, -1):
         remove_slide(presentation, index)
     remove_slide(presentation, 0)
 
@@ -503,10 +524,209 @@ def build_presentation() -> Path:
     )
     set_slide_number(value_slide.shapes[3], 7)
 
-    thanks_slide = presentation.slides[7]
-    set_title(thanks_slide.shapes[3], "Спасибо за внимание", font_size=26)
-    set_body(thanks_slide.shapes[1], ["Студент: Медведев Илья", "Группа: не указана"], font_size=18)
-    set_body(thanks_slide.shapes[0], ["Научный руководитель: данные уточняются"], font_size=16)
+    analogs_slide = presentation.slides[7]
+    clear_shape_text(analogs_slide.shapes[0])
+    clear_shape_text(analogs_slide.shapes[1])
+    clear_shape_text(analogs_slide.shapes[2])
+    clear_shape_text(analogs_slide.shapes[3])
+    analogs_title = add_textbox(
+        analogs_slide,
+        Inches(3.35),
+        Inches(0.78),
+        Inches(7.45),
+        Inches(0.48),
+        ["Аналоги и ниша решения"],
+        font_size=24,
+        color=TITLE_COLOR,
+        bold_first=True,
+    )
+    analogs_title.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
+    add_card(
+        analogs_slide,
+        Inches(0.78),
+        Inches(1.55),
+        Inches(3.7),
+        Inches(1.62),
+        "ABBYY FlexiCapture",
+        ["Сильный OCR и захват документов", "Но решение тяжелее и дороже локального стенда ВКР"],
+        fill_color=CARD_FILL,
+        title_size=17,
+        body_size=13,
+    )
+    add_card(
+        analogs_slide,
+        Inches(4.65),
+        Inches(1.55),
+        Inches(3.7),
+        Inches(1.62),
+        "Directum / ELMA / 1С",
+        ["Закрывают полный ECM-контур", "Но ориентированы на корпоративное внедрение"],
+        fill_color=CARD_ALT,
+        title_size=17,
+        body_size=13,
+    )
+    add_card(
+        analogs_slide,
+        Inches(8.52),
+        Inches(1.55),
+        Inches(3.0),
+        Inches(1.62),
+        "Наш проект",
+        ["Локальный запуск", "Пакетная сортировка архива", "Прозрачный ML-контур"],
+        fill_color=CARD_FILL,
+        title_size=17,
+        body_size=13,
+    )
+    add_card(
+        analogs_slide,
+        Inches(0.95),
+        Inches(3.62),
+        Inches(10.6),
+        Inches(1.45),
+        "Ниша разрабатываемого ПО",
+        ["Компактный сервис предварительной маршрутизации документов: не заменяет ECM-платформу, а решает задачу быстрой первичной сортировки и демонстрирует воспроизводимый прикладной ML-проект."],
+        fill_color=CARD_ALT,
+        title_size=19,
+        body_size=15,
+    )
+    add_textbox(
+        analogs_slide,
+        Inches(0.85),
+        Inches(5.75),
+        Inches(10.1),
+        Inches(0.42),
+        ["Ключевое отличие - фокус именно на локальной сортировке массива документов и простом повторяемом развертывании."],
+        font_size=12,
+        color=TITLE_COLOR,
+    )
+    add_slide_number_box(analogs_slide, 8)
+
+    database_slide = presentation.slides[8]
+    clear_all_text(database_slide)
+    set_title(database_slide.shapes[0], "База данных и результат пакетной сортировки", font_size=24)
+    database_slide.shapes.add_picture(
+        str(settings.database_figure),
+        left=Inches(0.72),
+        top=Inches(1.55),
+        width=Inches(5.2),
+        height=Inches(3.05),
+    )
+    database_slide.shapes.add_picture(
+        str(settings.figures_dir / "archive_routing_scheme.png"),
+        left=Inches(6.22),
+        top=Inches(1.55),
+        width=Inches(5.35),
+        height=Inches(3.05),
+    )
+    add_card(
+        database_slide,
+        Inches(0.8),
+        Inches(5.0),
+        Inches(3.55),
+        Inches(0.9),
+        "SQLite",
+        ["Хранит одиночные запросы, пакетные прогоны и реестр моделей."],
+        fill_color=CARD_FILL,
+        title_size=15,
+        body_size=11,
+    )
+    add_card(
+        database_slide,
+        Inches(4.55),
+        Inches(5.0),
+        Inches(3.45),
+        Inches(0.9),
+        "CSV-сводка",
+        ["По каждому файлу сохраняются путь, класс и статус обработки."],
+        fill_color=CARD_ALT,
+        title_size=15,
+        body_size=11,
+    )
+    add_card(
+        database_slide,
+        Inches(8.2),
+        Inches(5.0),
+        Inches(3.35),
+        Inches(0.9),
+        "Итоговый ZIP",
+        ["Пользователь получает архив с папками по типам документов."],
+        fill_color=CARD_FILL,
+        title_size=15,
+        body_size=11,
+    )
+    set_body(
+        database_slide.shapes[6],
+        ["Пакетный режим связывает ML-модели, файловую систему и журналирование в единую прикладную цепочку."],
+        font_size=12,
+    )
+    set_slide_number(database_slide.shapes[7], 9)
+
+    summary_slide = presentation.slides[9]
+    clear_all_text(summary_slide)
+    set_title(summary_slide.shapes[0], "Выводы и перспективы развития", font_size=24)
+    add_textbox(
+        summary_slide,
+        Inches(0.58),
+        Inches(1.18),
+        Inches(11.0),
+        Inches(0.7),
+        ["Разработанное ПО решает прикладную задачу первичной маршрутизации массива документов в локальном контуре."],
+        font_size=15,
+    )
+    add_textbox(
+        summary_slide,
+        Inches(0.58),
+        Inches(1.9),
+        Inches(4.8),
+        Inches(0.4),
+        ["Подтверждено"],
+        font_size=19,
+        color=TITLE_COLOR,
+        bold_first=True,
+    )
+    add_textbox(
+        summary_slide,
+        Inches(0.58),
+        Inches(2.32),
+        Inches(5.2),
+        Inches(2.35),
+        [
+            "Рабочий интерфейс объединяет текстовый, визуальный и пакетный сценарии.",
+            "Система сохраняет историю операций и выдает структурированный результат сортировки.",
+            "Качество моделей и автотесты подтверждают воспроизводимость решения.",
+        ],
+        font_size=14,
+    )
+    add_textbox(
+        summary_slide,
+        Inches(6.55),
+        Inches(1.9),
+        Inches(4.85),
+        Inches(0.4),
+        ["Дальнейшее развитие"],
+        font_size=19,
+        color=TITLE_COLOR,
+        bold_first=True,
+    )
+    add_textbox(
+        summary_slide,
+        Inches(6.55),
+        Inches(2.32),
+        Inches(4.65),
+        Inches(2.25),
+        [
+            "Интеграция OCR для PDF и сканов документов.",
+            "Расширение корпуса и номенклатуры типов документов.",
+            "Подключение к реальным корпоративным потокам документооборота.",
+        ],
+        font_size=14,
+    )
+    set_body(
+        summary_slide.shapes[6],
+        ["Итог ВКР: получен переносимый прототип системы интеллектуальной сортировки документов на Python."],
+        font_size=12,
+    )
+    set_slide_number(summary_slide.shapes[7], 10)
 
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
     output_path = DOCS_DIR / OUTPUT_NAME
