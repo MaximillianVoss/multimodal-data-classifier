@@ -1,34 +1,36 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from vkr_classifier.config import Settings
-from vkr_classifier.data.image_generator import create_shape_image
+from vkr_classifier.data.image_generator import create_document_image
 from vkr_classifier.service import ClassifierService
 
 
-def test_text_classification_detects_technology(service: ClassifierService) -> None:
+def test_text_classification_detects_invoice(service: ClassifierService) -> None:
     result = service.classify_text(
-        "Инженерная команда реализовала интерфейс работы с API и улучшила надежность цифровой платформы."
+        "Счет выставлен поставщиком на оплату услуг. В документе указаны реквизиты, сумма и срок оплаты."
     )
-    assert result["label"] == "Технологии"
+    assert result["label"] == "Счет"
     assert float(result["confidence"]) > 0.6
 
 
-def test_image_classification_detects_triangle(service: ClassifierService, settings: Settings) -> None:
-    image = create_shape_image("Треугольник", seed=2024, image_size=settings.image_size)
+def test_image_classification_detects_order_layout(service: ClassifierService, settings: Settings) -> None:
+    image = create_document_image("Приказ", seed=2024, image_size=settings.image_size)
     result = service.classify_image(image)
-    assert result["label"] == "Треугольник"
+    assert result["label"] == "Приказ"
     assert float(result["confidence"]) > 0.6
 
 
 def test_image_classification_accepts_file_path(service: ClassifierService, settings: Settings) -> None:
-    image = create_shape_image("Квадрат", seed=2025, image_size=settings.image_size)
-    file_path = settings.demo_examples_dir / "test_square.png"
+    image = create_document_image("Договор", seed=2025, image_size=settings.image_size)
+    file_path = settings.demo_examples_dir / "test_contract.png"
     image.save(file_path)
 
     result = service.classify_image(file_path)
-    assert result["label"] == "Квадрат"
+    assert result["label"] == "Договор"
     assert float(result["confidence"]) > 0.6
 
 
@@ -47,6 +49,20 @@ def test_model_registry_contains_only_current_models_with_relative_paths(service
     paths = {item["modality"]: str(item["artifact_path"]) for item in models}
     assert paths["text"] == "artifacts/models/text_classifier.joblib"
     assert paths["image"] == "artifacts/models/image_classifier.joblib"
+
+
+def test_batch_archive_classification_returns_summary(
+    service: ClassifierService,
+    batch_archive_path,
+) -> None:
+    result = service.classify_archive(batch_archive_path)
+
+    assert result["source_name"] == batch_archive_path.name
+    assert result["total_files"] == 3
+    assert result["processed_files"] == 2
+    assert result["skipped_files"] == 1
+    assert Path(result["output_archive_path"]).exists()
+    assert set(result["label_distribution"].keys()) == {"Договор", "Приказ"}
 
 
 def test_ensure_ready_does_not_reload_models_when_service_is_already_ready(

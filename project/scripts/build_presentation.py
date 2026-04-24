@@ -22,11 +22,11 @@ from vkr_classifier.config import get_settings  # noqa: E402
 
 OUTPUT_NAME = "Презентация ВКР.pptx"
 TEMPLATE_NAME = "Шаблон презентации.pptx"
-TITLE_COLOR = RGBColor(59, 55, 152)
-TEXT_COLOR = RGBColor(44, 44, 44)
-ACCENT = RGBColor(92, 113, 196)
-CARD_FILL = RGBColor(247, 248, 252)
-CARD_ALT = RGBColor(236, 241, 255)
+TITLE_COLOR = RGBColor(47, 48, 131)
+TEXT_COLOR = RGBColor(36, 39, 49)
+ACCENT = RGBColor(83, 104, 215)
+CARD_FILL = RGBColor(247, 249, 255)
+CARD_ALT = RGBColor(232, 240, 255)
 
 
 def remove_slide(prs: Presentation, index: int) -> None:
@@ -54,7 +54,14 @@ def set_title(shape, text: str, font_size: int = 28) -> None:
         set_text_run_style(run, size=font_size, color=TITLE_COLOR, bold=True)
 
 
-def set_body(shape, lines: list[str], *, font_size: int = 20, color: RGBColor = TEXT_COLOR, bold_first: bool = False) -> None:
+def set_body(
+    shape,
+    lines: list[str],
+    *,
+    font_size: int = 20,
+    color: RGBColor = TEXT_COLOR,
+    bold_first: bool = False,
+) -> None:
     text_frame = shape.text_frame
     text_frame.clear()
     text_frame.word_wrap = True
@@ -165,8 +172,8 @@ def set_slide_number(shape, number: int) -> None:
 def build_presentation() -> Path:
     settings = get_settings(PROJECT_DIR)
     summary = pd.read_csv(settings.summary_metrics_path)
-    image_metrics = summary[summary["model"] == "Модель изображений"].iloc[0]
     text_metrics = summary[summary["model"] == "Текстовая модель"].iloc[0]
+    image_metrics = summary[summary["model"] == "Модель изображений"].iloc[0]
 
     presentation = Presentation(DOCS_DIR / TEMPLATE_NAME)
 
@@ -177,159 +184,183 @@ def build_presentation() -> Path:
     title_slide = presentation.slides[0]
     set_title(
         title_slide.shapes[3],
-        "Разработка системы классификации изображений и текстовых данных на языке Python с фронтендом на low-code платформе",
-        font_size=24,
+        "Разработка системы интеллектуальной классификации и пакетной сортировки документов на языке Python с low-code интерфейсом",
+        font_size=23,
     )
     set_body(title_slide.shapes[1], ["Студент: Медведев Илья", "Группа: не указана"], font_size=18)
     set_body(title_slide.shapes[0], ["Научный руководитель: данные уточняются"], font_size=16)
 
     relevance_slide = presentation.slides[1]
     clear_content_placeholders(relevance_slide)
-    set_title(relevance_slide.shapes[1], "Актуальность темы")
+    set_title(relevance_slide.shapes[1], "Практическая задача и актуальность")
     add_card(
         relevance_slide,
-        Inches(0.62),
+        Inches(0.72),
         Inches(1.55),
-        Inches(2.9),
-        Inches(1.55),
-        "Данные растут",
-        ["Текстовые и графические файлы требуют автоматической сортировки."],
+        Inches(2.85),
+        Inches(1.5),
+        "Смешанные архивы",
+        ["Организации получают документы текстом, сканами и пакетами файлов."],
         fill_color=CARD_FILL,
         title_size=16,
         body_size=13,
     )
     add_card(
         relevance_slide,
-        Inches(3.67),
+        Inches(3.72),
         Inches(1.55),
-        Inches(3.0),
+        Inches(2.9),
+        Inches(1.5),
+        "Ручная сортировка",
+        ["Разбор массива документов занимает время и плохо масштабируется."],
+        fill_color=CARD_ALT,
+        title_size=16,
+        body_size=13,
+    )
+    add_card(
+        relevance_slide,
+        Inches(6.77),
         Inches(1.55),
-        "Мультимодальность",
-        ["Современным системам нужен единый контур для текста и изображений."],
+        Inches(2.9),
+        Inches(1.5),
+        "ML-подход",
+        ["Тип документа можно определять по тексту и по структуре макета."],
+        fill_color=CARD_FILL,
+        title_size=16,
+        body_size=13,
+    )
+    add_card(
+        relevance_slide,
+        Inches(9.82),
+        Inches(1.55),
+        Inches(2.35),
+        Inches(1.5),
+        "Low-code UI",
+        ["Gradio дает быстрый прикладной интерфейс без отдельного frontend."],
         fill_color=CARD_ALT,
         title_size=15,
-        body_size=13,
-    )
-    add_card(
-        relevance_slide,
-        Inches(6.82),
-        Inches(1.55),
-        Inches(2.9),
-        Inches(1.55),
-        "Python и ML",
-        ["Библиотеки машинного обучения позволяют быстро собрать прикладной прототип."],
-        fill_color=CARD_FILL,
-        title_size=16,
-        body_size=13,
-    )
-    add_card(
-        relevance_slide,
-        Inches(9.87),
-        Inches(1.55),
-        Inches(2.75),
-        Inches(1.55),
-        "Low-code UI",
-        ["Gradio дает low-code интерфейс без ручной frontend-разработки."],
-        fill_color=CARD_ALT,
-        title_size=16,
-        body_size=13,
+        body_size=12,
     )
     add_card(
         relevance_slide,
         Inches(0.95),
-        Inches(3.6),
+        Inches(3.55),
         Inches(11.15),
-        Inches(1.35),
+        Inches(1.45),
         "Цель работы",
-        ["Разработать локальное приложение для классификации текста и изображений с API, low-code интерфейсом и тестами."],
+        ["Разработать локальное приложение, которое классифицирует документы и автоматически сортирует ZIP-архив по типам: договор, счет, приказ, служебная записка, отчет."],
         fill_color=CARD_ALT,
         title_size=20,
-        body_size=17,
+        body_size=16,
     )
     set_body(
         relevance_slide.shapes[2],
-        ["Результатом стал единый Python-проект, готовый к запуску в PyCharm."],
+        ["Результат ВКР - не абстрактный классификатор, а прикладной сервис первичной маршрутизации документов."],
         font_size=12,
     )
     set_slide_number(relevance_slide.shapes[3], 2)
 
-    stack_slide = presentation.slides[2]
-    clear_content_placeholders(stack_slide)
-    set_title(stack_slide.shapes[1], "Выбранные технические решения")
-    tech_cards = [
-        ("Python 3.12", ["единая среда разработки и запуска"]),
-        ("FastAPI", ["серверная часть и REST API"]),
-        ("Gradio", ["low-code интерфейс"]),
-        ("scikit-learn", ["обучение и инференс моделей"]),
-        ("SQLite", ["история запросов и метаданные"]),
-        ("pytest", ["автоматические проверки проекта"]),
-    ]
-    positions = [
-        (Inches(0.8), Inches(1.55)),
-        (Inches(4.15), Inches(1.55)),
-        (Inches(7.5), Inches(1.55)),
-        (Inches(0.8), Inches(3.35)),
-        (Inches(4.15), Inches(3.35)),
-        (Inches(7.5), Inches(3.35)),
-    ]
-    for (title, body), (left, top) in zip(tech_cards, positions, strict=False):
-        add_card(stack_slide, left, top, Inches(2.95), Inches(1.45), title, body, fill_color=CARD_FILL)
+    tasks_slide = presentation.slides[2]
+    clear_content_placeholders(tasks_slide)
+    set_title(tasks_slide.shapes[1], "Поддерживаемые сценарии")
+    add_card(
+        tasks_slide,
+        Inches(0.8),
+        Inches(1.55),
+        Inches(3.7),
+        Inches(1.55),
+        "1. Текст документа",
+        ["Ввод текста и мгновенное определение типа документа."],
+        fill_color=CARD_FILL,
+    )
+    add_card(
+        tasks_slide,
+        Inches(4.78),
+        Inches(1.55),
+        Inches(3.7),
+        Inches(1.55),
+        "2. Скан документа",
+        ["Загрузка изображения и классификация по макету страницы."],
+        fill_color=CARD_ALT,
+    )
+    add_card(
+        tasks_slide,
+        Inches(8.76),
+        Inches(1.55),
+        Inches(3.0),
+        Inches(1.55),
+        "3. ZIP-архив",
+        ["Пакетная сортировка массива файлов и выдача нового архива."],
+        fill_color=CARD_FILL,
+    )
+    add_card(
+        tasks_slide,
+        Inches(0.95),
+        Inches(3.55),
+        Inches(10.9),
+        Inches(1.55),
+        "Классы документов",
+        ["Договор", "Счет", "Приказ", "Служебная записка", "Отчет"],
+        fill_color=CARD_ALT,
+        title_size=18,
+        body_size=16,
+    )
     set_body(
-        stack_slide.shapes[2],
-        ["Проект открывается в PyCharm и запускается локально одной командой."],
+        tasks_slide.shapes[2],
+        ["Ключевое расширение проекта - пакетная сортировка архива, добавляющая практическую ценность приложению."],
         font_size=12,
     )
-    set_slide_number(stack_slide.shapes[3], 3)
+    set_slide_number(tasks_slide.shapes[3], 3)
 
     architecture_slide = presentation.slides[3]
     clear_content_placeholders(architecture_slide)
-    set_title(architecture_slide.shapes[1], "Архитектурное проектирование")
+    set_title(architecture_slide.shapes[1], "Архитектура решения")
     architecture_slide.shapes.add_picture(
         str(settings.architecture_figure),
-        left=Inches(0.9),
-        top=Inches(1.5),
-        width=Inches(11.45),
-        height=Inches(3.55),
+        left=Inches(0.82),
+        top=Inches(1.48),
+        width=Inches(11.1),
+        height=Inches(3.72),
     )
     add_card(
         architecture_slide,
-        Inches(0.95),
-        Inches(5.3),
-        Inches(3.55),
-        Inches(0.78),
-        "UI",
-        ["Gradio принимает ввод пользователя"],
+        Inches(0.85),
+        Inches(5.35),
+        Inches(3.35),
+        Inches(0.82),
+        "Интерфейс",
+        ["Gradio собирает три прикладных сценария в одном окне."],
         fill_color=CARD_FILL,
-        title_size=16,
-        body_size=12,
+        title_size=15,
+        body_size=11,
     )
     add_card(
         architecture_slide,
-        Inches(4.8),
-        Inches(5.3),
+        Inches(4.55),
+        Inches(5.35),
         Inches(3.05),
-        Inches(0.78),
-        "API",
-        ["FastAPI маршрутизирует запросы"],
+        Inches(0.82),
+        "Сервисный контур",
+        ["FastAPI и сервисный слой управляют классификацией и логированием."],
         fill_color=CARD_ALT,
-        title_size=16,
-        body_size=12,
+        title_size=15,
+        body_size=11,
     )
     add_card(
         architecture_slide,
-        Inches(8.15),
-        Inches(5.3),
-        Inches(4.05),
-        Inches(0.78),
-        "Модели и данные",
-        ["scikit-learn и SQLite"],
+        Inches(7.95),
+        Inches(5.35),
+        Inches(3.85),
+        Inches(0.82),
+        "Хранилище и архивы",
+        ["SQLite хранит историю, архивный модуль формирует CSV и ZIP-результат."],
         fill_color=CARD_FILL,
-        title_size=16,
-        body_size=12,
+        title_size=15,
+        body_size=11,
     )
     set_body(
         architecture_slide.shapes[2],
-        ["Схема показывает полный путь данных: от интерфейса до модели и БД."],
+        ["Архитектура ориентирована на переносимость и локальный запуск без внешних сервисов."],
         font_size=12,
     )
     set_slide_number(architecture_slide.shapes[3], 4)
@@ -337,123 +368,137 @@ def build_presentation() -> Path:
     implementation_slide = presentation.slides[4]
     clear_content_placeholders(implementation_slide)
     set_title(implementation_slide.shapes[1], "Программная реализация")
-    implementation_picture = implementation_slide.shapes.add_picture(
-        str(settings.screenshots_dir / "ui_text_prediction.png"),
-        left=Inches(4.85),
+    implementation_slide.shapes.add_picture(
+        str(settings.interaction_figure),
+        left=Inches(5.0),
         top=Inches(1.38),
-        width=Inches(7.4),
-        height=Inches(4.82),
+        width=Inches(6.95),
+        height=Inches(4.55),
     )
-    implementation_picture.crop_bottom = 0.47
-    implementation_picture.crop_left = 0.02
-    implementation_picture.crop_right = 0.02
-    implementation_picture.crop_top = 0.06
     add_card(
         implementation_slide,
-        Inches(0.75),
-        Inches(1.75),
-        Inches(3.95),
-        Inches(1.68),
+        Inches(0.7),
+        Inches(1.65),
+        Inches(4.0),
+        Inches(1.65),
         "Что реализовано",
-        ["REST API и сервисный слой", "две модели классификации", "SQLite-журнал запросов"],
+        ["текстовая модель TF-IDF + Logistic Regression", "визуальная модель Random Forest", "пакетная сортировка ZIP-архива"],
         fill_color=CARD_FILL,
     )
     add_card(
         implementation_slide,
-        Inches(0.75),
-        Inches(3.72),
-        Inches(3.95),
-        Inches(1.52),
-        "Пользовательские сценарии",
-        ["ввод текста", "загрузка изображения", "просмотр метрик и истории"],
+        Inches(0.7),
+        Inches(3.65),
+        Inches(4.0),
+        Inches(1.62),
+        "Сопровождающие блоки",
+        ["SQLite-журнал истории", "демо-архив и отчеты", "автотесты и скрипты пересборки"],
         fill_color=CARD_ALT,
     )
     set_body(
         implementation_slide.shapes[2],
-        ["Интерфейс доступен по адресу /ui и не требует отдельной клиентской сборки."],
+        ["Интерфейс показывает не только прогноз, но и метрики моделей и историю пакетных прогонов."],
         font_size=12,
     )
     set_slide_number(implementation_slide.shapes[3], 5)
 
     results_slide = presentation.slides[5]
     clear_content_placeholders(results_slide)
-    set_title(results_slide.shapes[1], "Результаты экспериментальных исследований")
+    set_title(results_slide.shapes[1], "Результаты тестирования и экспериментов")
     results_slide.shapes.add_picture(
         str(settings.model_comparison_figure),
-        left=Inches(6.0),
+        left=Inches(6.08),
         top=Inches(1.55),
-        width=Inches(6.05),
-        height=Inches(3.85),
+        width=Inches(5.85),
+        height=Inches(3.75),
     )
     add_stat_card(
         results_slide,
-        Inches(0.75),
+        Inches(0.72),
         Inches(1.55),
-        Inches(4.9),
-        Inches(1.5),
+        Inches(4.95),
+        Inches(1.45),
         "Текстовая модель",
         [f"Accuracy: {text_metrics['accuracy']:.4f}", f"F1-score: {text_metrics['f1_score']:.4f}"],
         fill_color=CARD_ALT,
     )
     add_stat_card(
         results_slide,
-        Inches(0.75),
-        Inches(3.15),
-        Inches(4.9),
-        Inches(1.5),
-        "Модель изображений",
+        Inches(0.72),
+        Inches(3.1),
+        Inches(4.95),
+        Inches(1.45),
+        "Модель сканов",
         [f"Accuracy: {image_metrics['accuracy']:.4f}", f"F1-score: {image_metrics['f1_score']:.4f}"],
         fill_color=CARD_FILL,
     )
     add_textbox(
         results_slide,
-        Inches(0.82),
-        Inches(5.05),
-        Inches(5.0),
-        Inches(0.65),
-        ["6 автотестов, покрытие 87%, среднее время инференса: 1 мс и 25.5 мс."],
+        Inches(0.78),
+        Inches(4.9),
+        Inches(5.2),
+        Inches(0.78),
+        ["16 автотестов, покрытие кода выше 85%, интерактивное время ответа после прогрева."],
         font_size=13,
         color=TITLE_COLOR,
         bold_first=True,
     )
     set_body(
         results_slide.shapes[2],
-        ["Полученные метрики подтверждают устойчивую работу обеих моделей в интерактивном режиме."],
+        ["Пакетный режим формирует CSV-сводку и новый ZIP-архив с разложением по типам документов."],
         font_size=12,
     )
     set_slide_number(results_slide.shapes[3], 6)
 
     value_slide = presentation.slides[6]
     clear_content_placeholders(value_slide)
-    set_title(value_slide.shapes[1], "Практическая значимость работы")
-    benefit_cards = [
-        ("Локальный запуск", ["Не нужен внешний сервер БД или отдельная клиентская сборка."]),
-        ("Воспроизводимость", ["Модели, графики и документы собираются из одного репозитория."]),
-        ("Расширяемость", ["Можно подключить реальные датасеты и добавить новые классы."]),
-        ("Готовность к защите", ["Есть код, тесты, записка, презентация и интерфейс."]),
-    ]
-    positions = [
-        (Inches(0.8), Inches(1.65)),
-        (Inches(6.75), Inches(1.65)),
-        (Inches(0.8), Inches(3.55)),
-        (Inches(6.75), Inches(3.55)),
-    ]
-    for index, ((title, body), (left, top)) in enumerate(zip(benefit_cards, positions, strict=False)):
-        add_card(
-            value_slide,
-            left,
-            top,
-            Inches(5.0),
-            Inches(1.45),
-            title,
-            body,
-            fill_color=CARD_ALT if index % 2 else CARD_FILL,
-            title_size=18,
-            body_size=14,
-        )
+    set_title(value_slide.shapes[1], "Практическая ценность и развитие")
+    value_slide.shapes.add_picture(
+        str(settings.use_case_figure),
+        left=Inches(7.02),
+        top=Inches(1.62),
+        width=Inches(4.82),
+        height=Inches(3.35),
+    )
+    add_card(
+        value_slide,
+        Inches(0.78),
+        Inches(1.62),
+        Inches(5.8),
+        Inches(1.18),
+        "Практический эффект",
+        ["Сервис выполняет первичную расфасовку архива документов без ручного открытия каждого файла."],
+        fill_color=CARD_FILL,
+        title_size=18,
+        body_size=14,
+    )
+    add_card(
+        value_slide,
+        Inches(0.78),
+        Inches(2.95),
+        Inches(5.8),
+        Inches(1.18),
+        "Инженерная зрелость",
+        ["Есть рабочее приложение, локальная БД, тесты, диаграммы, пояснительная записка и презентация."],
+        fill_color=CARD_ALT,
+        title_size=18,
+        body_size=14,
+    )
+    add_card(
+        value_slide,
+        Inches(0.78),
+        Inches(4.28),
+        Inches(5.8),
+        Inches(1.18),
+        "Направления развития",
+        ["Подключение реальных корпусов документов, OCR и более сложных мультимодальных моделей."],
+        fill_color=CARD_FILL,
+        title_size=18,
+        body_size=14,
+    )
     set_body(
         value_slide.shapes[2],
-        ["Проект можно использовать как учебный и демонстрационный стенд мультимодальной классификации данных."],
+        ["Разработанное ПО может выступать как прототип сервиса первичной маршрутизации корпоративных документов."],
         font_size=12,
     )
     set_slide_number(value_slide.shapes[3], 7)

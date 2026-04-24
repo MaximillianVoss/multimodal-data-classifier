@@ -6,9 +6,9 @@ from pathlib import Path
 
 import joblib
 from PIL import Image
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.model_selection import train_test_split
-from sklearn.neighbors import KNeighborsClassifier
 
 from vkr_classifier.config import Settings
 from vkr_classifier.data.image_generator import build_image_dataset, image_to_vector
@@ -16,7 +16,7 @@ from vkr_classifier.data.image_generator import build_image_dataset, image_to_ve
 
 @dataclass(slots=True)
 class ImageModelArtifact:
-    classifier: KNeighborsClassifier
+    classifier: RandomForestClassifier
     labels: list[str]
     metrics: dict[str, float]
     class_report: dict[str, dict[str, float] | float]
@@ -44,9 +44,12 @@ def train_image_model(settings: Settings) -> ImageModelArtifact:
         stratify=labels,
     )
 
-    classifier = KNeighborsClassifier(
-        n_neighbors=1,
-        weights="distance",
+    classifier = RandomForestClassifier(
+        n_estimators=240,
+        max_depth=18,
+        min_samples_leaf=1,
+        random_state=settings.random_seed,
+        n_jobs=-1,
     )
     classifier.fit(x_train, y_train)
     predictions = classifier.predict(x_test)

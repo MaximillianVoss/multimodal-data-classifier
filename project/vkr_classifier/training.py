@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from vkr_classifier.batch_processing import create_demo_archive
 from vkr_classifier.config import Settings
 from vkr_classifier.data.image_generator import save_demo_examples
+from vkr_classifier.data.text_samples import build_demo_text_map
 from vkr_classifier.database import Database
 from vkr_classifier.diagrams import generate_documentation_figures
 from vkr_classifier.models.image_classifier import (
@@ -60,6 +62,33 @@ def _demo_examples_ready(settings: Settings) -> bool:
     return _all_exist(expected_files)
 
 
+def _demo_archive_ready(settings: Settings) -> bool:
+    return settings.demo_archive_path.exists()
+
+
+def _text_model_needs_refresh(settings: Settings) -> bool:
+    if not settings.text_model_path.exists():
+        return True
+    artifact = load_text_model(settings.text_model_path)
+    return (
+        artifact.labels != list(settings.text_labels)
+        or artifact.model_name != settings.text_model_name
+        or artifact.model_version != settings.text_model_version
+    )
+
+
+def _image_model_needs_refresh(settings: Settings) -> bool:
+    if not settings.image_model_path.exists():
+        return True
+    artifact = load_image_model(settings.image_model_path)
+    return (
+        artifact.labels != list(settings.image_labels)
+        or artifact.model_name != settings.image_model_name
+        or artifact.model_version != settings.image_model_version
+        or artifact.image_size != settings.image_size
+    )
+
+
 def generate_training_assets(
     settings: Settings,
     force: bool = True,
@@ -67,25 +96,41 @@ def generate_training_assets(
     settings.ensure_directories()
     database = Database(settings.database_path)
     database.initialize()
+    models_refreshed = False
 
-    if force or not settings.text_model_path.exists():
+    if force or _text_model_needs_refresh(settings):
         text_artifact = train_text_model(settings)
         save_text_model(text_artifact, settings.text_model_path)
+        models_refreshed = True
     else:
         text_artifact = load_text_model(settings.text_model_path)
 
-    if force or not settings.image_model_path.exists():
+    if force or _image_model_needs_refresh(settings):
         image_artifact = train_image_model(settings)
         save_image_model(image_artifact, settings.image_model_path)
+        models_refreshed = True
     else:
         image_artifact = load_image_model(settings.image_model_path)
 
-    if force or not _report_assets_ready(settings):
+    if force or models_refreshed or not _report_assets_ready(settings):
         export_reports(settings, text_artifact, image_artifact)
-    if force or not _documentation_figures_ready(settings):
+    if force or models_refreshed or not _documentation_figures_ready(settings):
         generate_documentation_figures(settings)
-    if force or not _demo_examples_ready(settings):
-        save_demo_examples(settings.demo_examples_dir, settings.image_labels, settings.image_size)
+
+    if force or models_refreshed or not _demo_examples_ready(settings):
+        image_examples = save_demo_examples(settings.demo_examples_dir, settings.image_labels, settings.image_size)
+    else:
+        image_examples = {
+            label: str(settings.demo_examples_dir / f"{index:02d}_{label}.png")
+            for index, label in enumerate(settings.image_labels, start=1)
+        }
+
+    if force or models_refreshed or not _demo_archive_ready(settings):
+        create_demo_archive(
+            settings.demo_archive_path,
+            text_examples=build_demo_text_map(),
+            image_examples={label: Path(path) for label, path in image_examples.items()},
+        )
 
     database.replace_model_registry(
         [

@@ -22,9 +22,9 @@ def create_application(
     service.ensure_ready()
 
     app = FastAPI(
-        title="VKR Classifier",
+        title="Document Routing System",
         version=__version__,
-        description="Классификация текстов и изображений с low-code интерфейсом.",
+        description="Классификация и пакетная сортировка документов по тексту и сканам с low-code интерфейсом.",
     )
     app.state.classifier_service = service
     app.include_router(build_api_router(service))

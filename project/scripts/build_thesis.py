@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 import sys
+from datetime import date
 from pathlib import Path
 from statistics import mean, median
 
 import pandas as pd
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from docx.shared import Inches, Pt
 from docx.table import Table
 from docx.text.paragraph import Paragraph
+from PIL import Image, ImageDraw
 
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
@@ -21,7 +23,8 @@ if str(PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR))
 
 from vkr_classifier.config import get_settings  # noqa: E402
-from vkr_classifier.data.image_generator import create_shape_image  # noqa: E402
+from vkr_classifier.data.image_generator import create_document_image  # noqa: E402
+from vkr_classifier.data.text_samples import build_demo_text_map  # noqa: E402
 from vkr_classifier.service import ClassifierService  # noqa: E402
 
 
@@ -31,28 +34,23 @@ STYLE_BODY = "ГОСТ Текст"
 STYLE_CAPTION = "Caption"
 OUTPUT_NAME = "Пояснительная записка.docx"
 SOURCE_NAME = "Пояснительная записка_исходная.docx"
+ACCESS_DATE = date.today().strftime("%d.%m.%Y")
 
 
-def insert_paragraph_after(paragraph: Paragraph, text: str = "", style: str | None = None) -> Paragraph:
-    new_paragraph = OxmlElement("w:p")
-    paragraph._p.addnext(new_paragraph)
-    result = Paragraph(new_paragraph, paragraph._parent)
-    if text:
-        result.add_run(text)
-    if style:
-        result.style = style
-    return result
-
-
-def set_paragraph_text(paragraph: Paragraph, text: str) -> None:
-    paragraph.text = text
-
-
-def clear_paragraph(paragraph: Paragraph) -> None:
+def delete_paragraph(paragraph: Paragraph) -> None:
     element = paragraph._element
-    for child in list(element):
-        if child.tag != qn("w:pPr"):
-            element.remove(child)
+    parent = element.getparent()
+    if parent is not None:
+        parent.remove(element)
+
+
+def clear_document_paragraphs(document: Document) -> None:
+    for paragraph in list(document.paragraphs):
+        delete_paragraph(paragraph)
+    body = document._element.body
+    for child in list(body):
+        if child.tag == qn("w:sdt"):
+            body.remove(child)
 
 
 def set_run_font(run, font_name: str = "Times New Roman", font_size: int = 14, bold: bool | None = None) -> None:
@@ -63,7 +61,13 @@ def set_run_font(run, font_name: str = "Times New Roman", font_size: int = 14, b
         run.font.bold = bold
 
 
-def format_paragraph_runs(paragraph: Paragraph, font_name: str = "Times New Roman", font_size: int = 14, bold: bool | None = None) -> None:
+def format_paragraph_runs(
+    paragraph: Paragraph,
+    *,
+    font_name: str = "Times New Roman",
+    font_size: int = 14,
+    bold: bool | None = None,
+) -> None:
     for run in paragraph.runs:
         set_run_font(run, font_name=font_name, font_size=font_size, bold=bold)
 
@@ -73,16 +77,28 @@ def format_caption(paragraph: Paragraph) -> None:
     format_paragraph_runs(paragraph, font_name="Times New Roman", font_size=14)
 
 
-def add_centered_picture(paragraph: Paragraph, image_path: Path, width_inches: float = 6.1) -> None:
-    clear_paragraph(paragraph)
-    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = paragraph.add_run()
-    run.add_picture(str(image_path), width=Inches(width_inches))
+def add_heading(document: Document, text: str, style: str = STYLE_H1) -> Paragraph:
+    paragraph = document.add_paragraph(text, style=style)
+    format_paragraph_runs(paragraph, font_name="Times New Roman", font_size=14, bold=True)
+    return paragraph
+
+
+def add_body_paragraph(document: Document, text: str) -> Paragraph:
+    paragraph = document.add_paragraph(text, style=STYLE_BODY)
+    format_paragraph_runs(paragraph, font_name="Times New Roman", font_size=14)
+    return paragraph
+
+
+def add_centered_picture(document: Document, image_path: Path, caption: str, *, width_inches: float = 6.0) -> None:
+    picture_paragraph = document.add_paragraph("", style=STYLE_BODY)
+    picture_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    picture_paragraph.add_run().add_picture(str(image_path), width=Inches(width_inches))
+    caption_paragraph = document.add_paragraph(caption, style=STYLE_CAPTION)
+    format_caption(caption_paragraph)
 
 
 def add_styled_table(document: Document, title: str, data: pd.DataFrame) -> Table:
-    title_paragraph = document.add_paragraph(title, style=STYLE_BODY)
-    title_paragraph.style = STYLE_BODY
+    title_paragraph = add_body_paragraph(document, title)
     title_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
     table = document.add_table(rows=1, cols=len(data.columns))
@@ -103,19 +119,20 @@ def add_styled_table(document: Document, title: str, data: pd.DataFrame) -> Tabl
             run = paragraph.add_run(str(value))
             set_run_font(run, font_name="Times New Roman", font_size=14)
 
+    document.add_paragraph("", style=STYLE_BODY)
     return table
 
 
 def measure_latency(service: ClassifierService) -> dict[str, float]:
-    text = "Инженерная команда реализовала интерфейс работы с API и улучшила надежность цифровой платформы."
-    image = create_shape_image("Звезда", seed=1234, image_size=service.settings.image_size)
+    text = build_demo_text_map()["Счет"]
+    image = create_document_image("Приказ", seed=2024, image_size=service.settings.image_size)
 
     for _ in range(5):
-        service.classify_text(text)
-        service.classify_image(image)
+        service.classify_text(text, log_request=False)
+        service.classify_image(image, log_request=False)
 
-    text_times = [int(service.classify_text(text)["processing_time_ms"]) for _ in range(30)]
-    image_times = [int(service.classify_image(image)["processing_time_ms"]) for _ in range(30)]
+    text_times = [int(service.classify_text(text, log_request=False)["processing_time_ms"]) for _ in range(30)]
+    image_times = [int(service.classify_image(image, log_request=False)["processing_time_ms"]) for _ in range(30)]
     return {
         "text_avg": round(mean(text_times), 2),
         "text_median": float(median(text_times)),
@@ -124,265 +141,917 @@ def measure_latency(service: ClassifierService) -> dict[str, float]:
     }
 
 
-def build_document() -> Path:
-    settings = get_settings(PROJECT_DIR)
-    service = ClassifierService(settings)
-    service.ensure_ready()
-    latency = measure_latency(service)
-
-    document = Document(DOCS_DIR / SOURCE_NAME)
-
-    structure_paragraph = document.paragraphs[20]
-    architecture_image_paragraph = document.paragraphs[110]
-    architecture_caption = document.paragraphs[111]
-    workflow_image_paragraph = document.paragraphs[130]
-    workflow_caption = document.paragraphs[131]
-    interaction_image_paragraph = document.paragraphs[139]
-    interaction_caption = document.paragraphs[140]
-    technology_paragraphs = document.paragraphs[145:152]
-    requirements_tail = document.paragraphs[100]
-    module_tail = document.paragraphs[127]
-
-    set_paragraph_text(
-        structure_paragraph,
-        "Структура выпускной квалификационной работы включает введение, четыре главы основной части, "
-        "заключение, список использованных источников и приложение. В первой главе проводится анализ "
-        "предметной области классификации изображений и текстовых данных. Во второй главе рассматриваются "
-        "вопросы проектирования программной системы, включая архитектуру, варианты использования и структуру "
-        "базы данных. В третьей главе описывается практическая реализация программного продукта и интерфейса. "
-        "В четвертой главе приводятся результаты тестирования и оценки качества разработанной системы.",
-    )
-
-    add_centered_picture(architecture_image_paragraph, settings.architecture_figure)
-    set_paragraph_text(architecture_caption, "Рисунок 2.2 - Архитектура программной системы классификации данных")
-    format_caption(architecture_caption)
-
-    add_centered_picture(workflow_image_paragraph, settings.workflow_figure)
-    set_paragraph_text(workflow_caption, "Рисунок 2.4 - Алгоритм обработки пользовательского запроса")
-    format_caption(workflow_caption)
-
-    add_centered_picture(interaction_image_paragraph, settings.interaction_figure)
-    set_paragraph_text(
-        interaction_caption,
-        "Рисунок 2.5 - Взаимодействие low-code интерфейса, API и прикладных модулей",
-    )
-    format_caption(interaction_caption)
-
-    replacement_texts = [
-        "Для реализации разработанной системы выбран стек Python 3.12, FastAPI, Gradio, scikit-learn и SQLite [1, 4-7].",
-        "Язык Python используется как единая среда для серверной логики, процедур обучения моделей и автоматизации тестирования, что уменьшает связность проекта и упрощает сопровождение [1, 2].",
-        "В качестве серверной платформы применен FastAPI, позволяющий быстро развернуть REST API, описать входные схемы данных и получить встроенную документацию интерфейсов [4].",
-        "Low-code интерфейс реализован на базе Gradio. Данный инструмент позволяет создавать веб-формы для работы с моделями машинного обучения без ручной верстки фронтенда, что соответствует постановке задачи ВКР [5].",
-        "Для построения моделей текстовой и графической классификации выбрана библиотека scikit-learn, включающая готовые алгоритмы машинного обучения, средства оценки качества и сериализации артефактов [6].",
-        "Хранение истории запросов и метаданных обученных моделей обеспечивается встроенной СУБД SQLite, не требующей отдельного сервера и хорошо подходящей для настольного учебного проекта [7].",
-        "Выбранный набор технологий обеспечивает достаточную скорость работы, воспроизводимость результатов эксперимента и возможность дальнейшего расширения системы, включая замену моделей и развитие интерфейса [4-8].",
-    ]
-    for paragraph, text in zip(technology_paragraphs, replacement_texts, strict=False):
-        set_paragraph_text(paragraph, text)
-
-    current = requirements_tail
-    current = insert_paragraph_after(current, "Диаграмма вариантов использования системы", STYLE_H2)
-    current = insert_paragraph_after(
-        current,
-        "Для уточнения функций будущего программного продукта была построена диаграмма вариантов использования. "
-        "На ней отражены основные действия пользователя: классификация текста, классификация изображения, просмотр "
-        "истории обращений и просмотр метрик обученных моделей.",
-        STYLE_BODY,
-    )
-    current = insert_paragraph_after(
-        current,
-        "Наличие диаграммы вариантов использования позволило сформировать минимально достаточный набор пользовательских "
-        "сценариев, который затем был напрямую перенесен в структуру интерфейса Gradio и в набор автотестов.",
-        STYLE_BODY,
-    )
-    current = insert_paragraph_after(current, "", STYLE_BODY)
-    add_centered_picture(current, settings.use_case_figure)
-    current = insert_paragraph_after(
-        current,
-        "Рисунок 2.1 - Диаграмма вариантов использования системы классификации данных",
-        STYLE_CAPTION,
-    )
-    format_caption(current)
-
-    current = module_tail
-    current = insert_paragraph_after(current, "Проектирование структуры базы данных", STYLE_H2)
-    current = insert_paragraph_after(
-        current,
-        "Для обеспечения воспроизводимости эксперимента и накопления истории обращений в системе спроектирована "
-        "локальная база данных SQLite. Использование встроенной СУБД позволяет хранить результаты классификации "
-        "непосредственно рядом с приложением и не усложняет процесс развертывания [7].",
-        STYLE_BODY,
-    )
-    current = insert_paragraph_after(
-        current,
-        "В таблице classification_requests фиксируются тип запроса, источник данных и краткое представление входного "
-        "объекта. Таблица classification_results хранит итоговый класс, уровень уверенности модели и время обработки. "
-        "Дополнительно таблица model_registry содержит сведения о версиях моделей и достигнутых метриках качества.",
-        STYLE_BODY,
-    )
-    current = insert_paragraph_after(
-        current,
-        "Такая структура БД обеспечивает связь между пользовательским действием и результатом работы модели, а также "
-        "позволяет использовать накопленные сведения для последующего анализа, демонстрации и отладки системы.",
-        STYLE_BODY,
-    )
-    current = insert_paragraph_after(current, "", STYLE_BODY)
-    add_centered_picture(current, settings.database_figure)
-    current = insert_paragraph_after(current, "Рисунок 2.3 - Структура базы данных программной системы", STYLE_CAPTION)
-    format_caption(current)
-
-    document.add_page_break()
-    document.add_paragraph(
-        "ГЛАВА 3 РАЗРАБОТКА И РЕАЛИЗАЦИЯ ПРОГРАММНОЙ СИСТЕМЫ КЛАССИФИКАЦИИ ДАННЫХ",
-        style=STYLE_H1,
-    )
-
-    chapter_three_sections = {
-        "Общая организация проекта": [
-            "Практическая реализация выполнена в формате отдельного Python-проекта, пригодного для открытия в среде PyCharm. "
-            "В корне проекта размещены файл запуска main.py, конфигурация зависимостей, папка src с исходным кодом, "
-            "папка tests с автоматическими тестами и каталог artifacts с моделями, графиками и служебными данными эксперимента.",
-            "Исходный код разделен по функциональным областям. В пакете vkr_classifier выделены модули конфигурации, "
-            "доступа к данным, обучения моделей, пользовательского интерфейса, API и слоя хранения. Такое разбиение "
-            "облегчает сопровождение проекта и соответствует модульному принципу разработки [2].",
-            "Отдельные скрипты generate_assets.py и scripts/build_thesis.py обеспечивают автоматизацию подготовки "
-            "артефактов, используемых в пояснительной записке и презентации. За счет этого текстовая часть работы "
-            "связана с фактически полученными результатами, а не с декларативным описанием проекта.",
-        ],
-        "Реализация серверной части и прикладного API": [
-            "Серверная часть разработана на основе FastAPI [4]. При запуске приложения создается объект FastAPI, "
-            "в котором регистрируются маршруты проверки состояния сервиса, получения истории запросов, просмотра "
-            "метаданных моделей и запуска классификации текста либо изображения.",
-            "Слой API использует схемы данных pydantic, что позволяет проверять входные параметры и формировать "
-            "предсказуемый формат ответа. Для текстового запроса передается JSON-объект с полем text, а для "
-            "изображений используется multipart-загрузка файла через стандартный веб-механизм.",
-            "Внутри API не реализуется бизнес-логика. Все вычисления и операции записи в БД вынесены в сервисный слой "
-            "ClassifierService. Такой подход упрощает тестирование, исключает дублирование кода и позволяет использовать "
-            "одни и те же методы как из REST API, так и из low-code интерфейса.",
-        ],
-        "Реализация текстового классификатора": [
-            "Текстовый модуль построен на базе библиотеки scikit-learn [6]. Для подготовки признакового описания "
-            "используется TfidfVectorizer с биграммами, а в качестве классификатора выбрана логистическая регрессия. "
-            "Данная комбинация обеспечивает хорошее качество на тематических текстах и не требует длительного обучения.",
-            "Обучающий набор формируется программно. Для каждой категории создается множество предложений на русском "
-            "языке с различными шаблонами и предметной лексикой. В итоговом наборе используются классы 'Спорт', "
-            "'Технологии', 'Финансы' и 'Культура'.",
-            "После обучения пайплайн сериализуется в файл text_classifier.joblib. При обращении пользователя система "
-            "вычисляет вероятности по каждому классу, выбирает наиболее вероятную категорию и дополнительно возвращает "
-            "распределение вероятностей для визуального отображения в интерфейсе.",
-        ],
-        "Реализация классификации изображений": [
-            "Модуль изображений ориентирован на распознавание геометрических фигур, что позволяет воспроизвести полный "
-            "контур проектирования и тестирования без необходимости скачивания объемных внешних датасетов. Синтетический "
-            "набор данных генерируется средствами Pillow: для каждого класса создаются изображения с вариациями размера, "
-            "поворота, положения и шумовой компоненты.",
-            "Для классификации изображений используется алгоритм k ближайших соседей из библиотеки scikit-learn [6]. "
-            "На этапе подготовки входное изображение переводится в оттенки серого, приводится к размеру 32x32 пикселя "
-            "и разворачивается в вектор признаков. Такой подход оказался устойчивым на тестовом наборе и показал высокую "
-            "точность при минимальной вычислительной сложности.",
-            "Обученная модель сохраняется в файл image_classifier.joblib. При инференсе пользователю также возвращается "
-            "вероятностное распределение по классам 'Круг', 'Квадрат', 'Треугольник' и 'Звезда', что делает результат "
-            "интерпретируемым и удобным для демонстрации в рамках защиты.",
-        ],
-        "Реализация слоя хранения и журнала истории": [
-            "Для хранения прикладных данных применяется SQLite [7]. При первом запуске автоматически создаются таблицы "
-            "model_registry, classification_requests и classification_results. Благодаря этому приложение запускается "
-            "без предварительной ручной настройки сервера БД.",
-            "После каждого распознавания сервис формирует запись о пользовательском действии и результатах модели. "
-            "В журнале сохраняются тип запроса, краткое представление входных данных, итоговый класс, оценка уверенности "
-            "и фактическое время обработки. Эти сведения используются как в интерфейсе, так и в главе о тестировании.",
-            "Хранение версий моделей позволяет фиксировать достигнутые значения accuracy и weighted F1-score. При "
-            "следующем обновлении модели соответствующие значения в реестре перезаписываются, что делает проект пригодным "
-            "для последующей эволюции и повторного обучения.",
-        ],
-        "Реализация пользовательского low-code интерфейса": [
-            "Веб-интерфейс создан на базе Gradio [5] и встроен в серверное приложение по адресу /ui. На главной странице "
-            "размещены две вкладки: для работы с текстом и для работы с изображениями. В каждой вкладке пользователь может "
-            "ввести данные, запустить обработку и получить прогноз вместе с вероятностями по классам.",
-            "Правая часть интерфейса содержит блок метрик обученных моделей и таблицу истории последних запросов. "
-            "Таким образом, интерфейс служит не только точкой ввода данных, но и инструментом демонстрации прикладного "
-            "состояния системы, что важно для защиты ВКР.",
-            "Использование Gradio позволило отказаться от ручной HTML-верстки и сосредоточиться на логике сервиса. "
-            "При этом интерфейс остается полноценным веб-приложением и может использоваться как локально, так и "
-            "в качестве демонстрационного стенда для экспериментов.",
-        ],
-        "Выводы по третьей главе": [
-            "В третьей главе выполнена практическая реализация программной системы, объединяющей серверную часть на FastAPI, "
-            "low-code интерфейс на Gradio, две модели машинного обучения и подсистему хранения истории запросов.",
-            "Разработанная архитектура обеспечивает разделение ответственности между модулями, удобство сопровождения и "
-            "возможность автоматической генерации отчетных артефактов. Полученная реализация подготовлена к тестированию "
-            "и дальнейшей демонстрации в рамках защиты выпускной квалификационной работы.",
-        ],
-    }
-
-    for heading, paragraphs in chapter_three_sections.items():
-        document.add_paragraph(heading, style=STYLE_H2)
-        for text in paragraphs:
-            document.add_paragraph(text, style=STYLE_BODY)
-        if heading == "Реализация серверной части и прикладного API":
-            image_paragraph = document.add_paragraph("", style=STYLE_BODY)
-            add_centered_picture(image_paragraph, settings.workflow_figure)
-            caption = document.add_paragraph("Рисунок 3.1 - Последовательность обработки запроса в приложении", style=STYLE_CAPTION)
-            format_caption(caption)
-        if heading == "Реализация пользовательского low-code интерфейса":
-            image_paragraph = document.add_paragraph("", style=STYLE_BODY)
-            add_centered_picture(image_paragraph, settings.screenshots_dir / "ui_home.png", width_inches=6.15)
-            caption = document.add_paragraph("Рисунок 3.2 - Главный экран веб-интерфейса системы", style=STYLE_CAPTION)
-            format_caption(caption)
-            image_paragraph = document.add_paragraph("", style=STYLE_BODY)
-            add_centered_picture(image_paragraph, settings.screenshots_dir / "ui_text_prediction.png", width_inches=6.15)
-            caption = document.add_paragraph("Рисунок 3.3 - Пример получения результата текстовой классификации", style=STYLE_CAPTION)
-            format_caption(caption)
-
-    document.add_page_break()
-    document.add_paragraph("ГЛАВА 4 ТЕСТИРОВАНИЕ И ОЦЕНКА ЭФФЕКТИВНОСТИ РАЗРАБОТАННОЙ СИСТЕМЫ", style=STYLE_H1)
-
-    document.add_paragraph("Организация эксперимента и критерии оценки", style=STYLE_H2)
-    document.add_paragraph(
-        "Цель тестирования заключалась в проверке корректности работы интерфейса, API, сервисного слоя, "
-        "подсистемы хранения данных и качества обученных моделей. Для оценки использовались метрики accuracy, "
-        "precision, recall и F1-score, рекомендованные для задач классификации [3, 6].",
-        style=STYLE_BODY,
-    )
-    document.add_paragraph(
-        "Дополнительно была измерена задержка инференса после прогрева приложения. Среднее время обработки текста "
-        f"составило {latency['text_avg']} мс, медианное значение - {latency['text_median']} мс. Для изображений "
-        f"среднее время составило {latency['image_avg']} мс, медианное - {latency['image_median']} мс. "
-        "Полученные значения подтверждают возможность интерактивного использования системы.",
-        style=STYLE_BODY,
-    )
-
-    document.add_paragraph("Автоматическое тестирование программного продукта", style=STYLE_H2)
-    document.add_paragraph(
-        "Для автоматической проверки корректности проекта реализован набор из шести тестов на базе pytest [8]. "
-        "Тесты покрывают сервисный слой, файловые артефакты обучения и REST API. Суммарное покрытие исходного кода "
-        "по результатам запуска pytest --cov составило 86%.",
-        style=STYLE_BODY,
-    )
-    test_table = pd.DataFrame(
+def build_analogs_table() -> pd.DataFrame:
+    return pd.DataFrame(
         [
-            ["1", "text service", "Определение технологического текста", "Класс 'Технологии'"],
-            ["2", "image service", "Распознавание треугольника", "Класс 'Треугольник'"],
-            ["3", "training pipeline", "Проверка генерации моделей и графиков", "Все артефакты созданы"],
-            ["4", "text API", "Запрос POST /api/text/classify", "Корректный JSON-ответ"],
-            ["5", "image API", "Запрос POST /api/image/classify", "Корректный JSON-ответ"],
-            ["6", "history API", "Чтение истории запросов", "Наличие журналируемых записей"],
+            [
+                "ABBYY FlexiCapture",
+                "Интеллектуальный захват, OCR, классификация и экспорт документов",
+                "Высокая зрелость, enterprise-функции, интеграции",
+                "Избыточность и высокая стоимость для локального демонстрационного стенда",
+            ],
+            [
+                "Directum RX",
+                "Корпоративный документооборот, маршрутизация, работа с договорами и ОРД",
+                "Глубокая поддержка бизнес-процессов и контроля исполнения",
+                "Ориентирован на крупное внедрение, а не на компактный исследовательский прототип",
+            ],
+            [
+                "ELMA365 ECM",
+                "Хранение, регистрация, согласование, маршруты и электронный архив",
+                "Гибкая low-code настройка маршрутов и карточек документов",
+                "Сильная зависимость от экосистемы платформы и прикладных модулей",
+            ],
+            [
+                "1С:Документооборот",
+                "Работа с корреспонденцией, приказами, договорами и маршрутами согласования",
+                "Широкая распространенность и интеграция с учетными системами 1С",
+                "Сфокусирован на полноценной ECM-системе, а не на задаче ML-классификации архивов",
+            ],
+            [
+                "Разрабатываемое ПО",
+                "Локальная классификация текста, сканов и ZIP-архивов документов",
+                "Прозрачная архитектура, воспроизводимость, простая демонстрация ML-контура",
+                "Синтетический набор данных и ограниченный перечень типов документов",
+            ],
+        ],
+        columns=["Решение", "Основной функционал", "Сильные стороны", "Ограничения"],
+    )
+
+
+def build_document_class_features_table() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            ["Договор", "Стороны, предмет договора, условия, ответственность", "Плотные абзацы, парные подписи", "Фиксация соглашения между сторонами"],
+            ["Счет", "Реквизиты, сумма, НДС, оплата", "Крупная таблица и блок итогов", "Основание для оплаты"],
+            ["Приказ", "Распорядительные формулировки, пункты поручений", "Заголовок и нумерованные блоки", "Управленческое распоряжение"],
+            ["Служебная записка", "Адресат, просьба, обоснование", "Краткое тело, реквизиты адресата", "Внутреннее служебное обращение"],
+            ["Отчет", "Показатели, выводы, рекомендации", "Таблицы, диаграммы, аналитические блоки", "Подведение итогов работы"],
+        ],
+        columns=["Класс", "Текстовые признаки", "Визуальные признаки", "Функция документа"],
+    )
+
+
+def build_functional_requirements_table() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            ["F1", "Классификация текста документа", "Пользователь вставляет текст и получает тип документа и вероятности"],
+            ["F2", "Классификация скана документа", "Пользователь загружает изображение и получает прогноз по макету документа"],
+            ["F3", "Пакетная сортировка архива", "ZIP-архив автоматически разбирается по категориям документов"],
+            ["F4", "Формирование выходного архива", "Система возвращает ZIP с разложением по папкам и CSV-сводкой"],
+            ["F5", "Хранение истории", "Сохраняются одиночные запросы, пакетные прогоны и сведения о моделях"],
+            ["F6", "Отображение метрик", "Пользователь видит качество моделей и последние результаты обработки"],
+        ],
+        columns=["Код", "Требование", "Содержание"],
+    )
+
+
+def build_db_entities_table() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            ["classification_requests", "Фиксирует тип и источник одиночного запроса"],
+            ["classification_results", "Хранит прогноз, уверенность, время ответа и сведения о модели"],
+            ["model_registry", "Содержит реестр обученных моделей и их метрики"],
+            ["batch_runs", "Описывает пакетный запуск по ZIP-архиву"],
+            ["batch_items", "Фиксирует результат по каждому файлу внутри архива"],
+        ],
+        columns=["Таблица", "Назначение"],
+    )
+
+
+def build_nonfunctional_requirements_table() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            ["NF1", "Переносимость", "Проект должен запускаться на локальной машине без внешней СУБД и отдельных сервисов"],
+            ["NF2", "Производительность", "Интерактивные сценарии должны завершаться за доли секунды после прогрева"],
+            ["NF3", "Воспроизводимость", "Модели, графики и документы должны пересобираться из одного репозитория"],
+            ["NF4", "Прозрачность результатов", "Пользователь должен видеть историю запросов, метрики и сформированный архив"],
+            ["NF5", "Безопасность файловой обработки", "ZIP-архивы должны извлекаться с проверкой путей и поддерживаемых форматов"],
+        ],
+        columns=["Код", "Требование", "Содержание"],
+    )
+
+
+def build_stack_table() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            ["Python 3.12", "Единая среда разработки, обучения моделей и автоматизации"],
+            ["FastAPI", "REST API, схемы запросов и сервисные маршруты"],
+            ["Gradio", "Low-code web-интерфейс для демонстрации и работы пользователя"],
+            ["scikit-learn", "Построение текстовой и визуальной моделей классификации"],
+            ["SQLite", "Локальное хранение истории и метаданных моделей"],
+            ["python-docx", "Извлечение текста из DOCX при пакетной обработке"],
+            ["pytest", "Автоматическое тестирование критических сценариев"],
+        ],
+        columns=["Технология", "Роль в проекте"],
+    )
+
+
+def build_archive_structure_table() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            ["sorted_documents/Договор", "Файлы, распознанные как договоры"],
+            ["sorted_documents/Счет", "Файлы, распознанные как счета"],
+            ["sorted_documents/Приказ", "Файлы, распознанные как приказы"],
+            ["sorted_documents/Служебная записка", "Файлы, распознанные как служебные записки"],
+            ["sorted_documents/Отчет", "Файлы, распознанные как отчеты"],
+            ["summary.csv", "Сводка по всем файлам архива со статусом обработки"],
+        ],
+        columns=["Элемент результата", "Назначение"],
+    )
+
+
+def build_module_table() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            ["config.py", "Конфигурация путей, классов, параметров моделей и артефактов"],
+            ["data/text_samples.py", "Генерация корпуса текстов для пяти типов документов"],
+            ["data/image_generator.py", "Синтез макетов сканов документов и подготовка признаков"],
+            ["models/*", "Обучение и сериализация текстовой и графической моделей"],
+            ["batch_processing.py", "Разбор ZIP, извлечение файлов, упаковка результата"],
+            ["service.py", "Бизнес-логика классификации, журналирование, пакетная обработка"],
+            ["api.py", "Публикация REST-интерфейса для текста, изображений и архивов"],
+            ["ui.py", "Low-code интерфейс Gradio с тремя прикладными сценариями"],
+        ],
+        columns=["Модуль", "Назначение"],
+    )
+
+
+def build_latency_table(latency: dict[str, float]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            ["Текстовая классификация", f"{latency['text_avg']:.2f}", f"{latency['text_median']:.2f}"],
+            ["Классификация скана", f"{latency['image_avg']:.2f}", f"{latency['image_median']:.2f}"],
+        ],
+        columns=["Сценарий", "Среднее время, мс", "Медианное время, мс"],
+    )
+
+
+def build_api_table() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            ["GET /api/health", "Проверка готовности сервиса и моделей"],
+            ["GET /api/models", "Получение списка моделей и метрик"],
+            ["GET /api/history", "Получение истории одиночных запросов"],
+            ["GET /api/batch/history", "Получение истории пакетных прогонов"],
+            ["POST /api/text/classify", "Классификация текста документа"],
+            ["POST /api/image/classify", "Классификация скана документа"],
+            ["POST /api/batch/classify-archive", "Обработка ZIP-архива документов"],
+        ],
+        columns=["Маршрут", "Назначение"],
+    )
+
+
+def build_test_table() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            ["1", "text service", "Распознавание счета по текстовому описанию", "Класс 'Счет'"],
+            ["2", "image service", "Распознавание приказа по синтетическому скану", "Класс 'Приказ'"],
+            ["3", "image service", "Классификация изображения по файловому пути", "Класс 'Договор'"],
+            ["4", "training pipeline", "Проверка генерации моделей, отчетов и диаграмм", "Все артефакты существуют"],
+            ["5", "registry", "Контроль путей артефактов в model_registry", "Только относительные пути внутри проекта"],
+            ["6", "batch service", "Пакетная обработка ZIP-архива", "Создается итоговый архив и сводка"],
+            ["7", "startup", "Повторный ensure_ready не перезагружает модели", "Инициализация выполняется однократно"],
+            ["8", "text API", "Маршрут POST /api/text/classify", "Корректный JSON-ответ"],
+            ["9", "image API", "Маршрут POST /api/image/classify", "Корректный JSON-ответ"],
+            ["10", "batch API", "Маршрут POST /api/batch/classify-archive", "Возвращается сводка по архиву"],
         ],
         columns=["№", "Компонент", "Проверка", "Ожидаемый результат"],
     )
-    add_styled_table(document, "Таблица 4.1 - Сценарии автоматического тестирования", test_table)
 
-    document.add_paragraph("Результаты оценки качества моделей", style=STYLE_H2)
-    document.add_paragraph(
-        "После обучения моделей были получены итоговые значения метрик качества. Текстовая модель показала "
-        "идеальное разделение тематических классов на сформированном корпусе. Модель изображений также "
-        "обеспечила высокий уровень точности и устойчиво распознает все четыре геометрических класса.",
-        style=STYLE_BODY,
+
+def build_batch_summary_table(batch_result: dict[str, object]) -> pd.DataFrame:
+    distribution = batch_result.get("label_distribution", {})
+    rows = [
+        [label, count]
+        for label, count in sorted(distribution.items())
+    ]
+    return pd.DataFrame(rows, columns=["Тип документа", "Количество файлов"])
+
+
+def build_batch_items_table(batch_result: dict[str, object]) -> pd.DataFrame:
+    frame = pd.DataFrame(batch_result["items"])
+    frame = frame.rename(
+        columns={
+            "file_name": "Файл",
+            "relative_path": "Путь в архиве",
+            "modality": "Модальность",
+            "predicted_label": "Класс",
+            "status": "Статус",
+        }
     )
+    return frame[["Файл", "Путь в архиве", "Модальность", "Класс", "Статус"]]
+
+
+def build_project_structure_table() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            ["project/vkr_classifier", "Исходный код приложения и ML-пайплайна"],
+            ["project/tests", "Автотесты сервисного слоя, API и логики запуска"],
+            ["project/artifacts/models", "Сериализованные модели классификации"],
+            ["project/artifacts/tables", "CSV и JSON-отчеты с метриками"],
+            ["project/artifacts/figures", "Диаграммы, матрицы ошибок и служебные схемы"],
+            ["project/artifacts/demo_examples", "Демонстрационные сканы документов"],
+            ["project/artifacts/batch_exports", "Демо-архив и результаты пакетной сортировки"],
+            ["docs", "Пояснительная записка, презентация и сопроводительные материалы"],
+        ],
+        columns=["Элемент", "Назначение"],
+    )
+
+
+def build_document_samples_overview(settings) -> Path:
+    output_path = settings.figures_dir / "document_samples_overview.png"
+    settings.ensure_directories()
+
+    sample_paths = [
+        settings.demo_examples_dir / f"{index:02d}_{label}.png"
+        for index, label in enumerate(settings.image_labels, start=1)
+    ]
+    images = [Image.open(path).convert("RGB").resize((220, 300)) for path in sample_paths]
+
+    canvas = Image.new("RGB", (1180, 760), color=(248, 250, 255))
+    draw = ImageDraw.Draw(canvas)
+    draw.rounded_rectangle((24, 24, 1156, 736), radius=24, outline=(80, 100, 180), width=3, fill=(248, 250, 255))
+
+    positions = [
+        (55, 90),
+        (280, 90),
+        (505, 90),
+        (730, 90),
+        (955, 90),
+    ]
+    for (label, image), (left, top) in zip(zip(settings.image_labels, images, strict=False), positions, strict=False):
+        draw.rounded_rectangle((left - 10, top - 10, left + 230, top + 330), radius=18, fill=(235, 241, 255), outline=(107, 128, 211), width=2)
+        canvas.paste(image, (left, top))
+        draw.text((left + 20, top + 315), label, fill=(39, 44, 116))
+
+    draw.text(
+        (55, 40),
+        "Демонстрационные макеты документов, используемые для визуальной классификации",
+        fill=(39, 44, 116),
+    )
+    canvas.save(output_path)
+    for image in images:
+        image.close()
+    return output_path
+
+
+def build_archive_routing_figure(settings) -> Path:
+    output_path = settings.figures_dir / "archive_routing_scheme.png"
+    settings.ensure_directories()
+
+    canvas = Image.new("RGB", (1200, 620), color=(248, 250, 255))
+    draw = ImageDraw.Draw(canvas)
+
+    def box(x1, y1, x2, y2, text, *, fill):
+        draw.rounded_rectangle((x1, y1, x2, y2), radius=18, fill=fill, outline=(84, 103, 196), width=3)
+        draw.multiline_text((x1 + 18, y1 + 28), text, fill=(39, 44, 116), spacing=6)
+
+    box(60, 220, 240, 360, "ZIP-архив\nс документами", fill=(235, 241, 255))
+    box(340, 180, 620, 400, "Модуль пакетной обработки\n\n- извлечение файлов\n- выбор модальности\n- запуск модели\n- формирование CSV", fill=(247, 249, 255))
+    box(760, 70, 1120, 170, "Договор", fill=(235, 241, 255))
+    box(760, 190, 1120, 290, "Счет", fill=(247, 249, 255))
+    box(760, 310, 1120, 410, "Приказ", fill=(235, 241, 255))
+    box(760, 430, 1120, 530, "Служебная записка / Отчет", fill=(247, 249, 255))
+
+    draw.line((240, 290, 340, 290), fill=(84, 103, 196), width=6)
+    draw.polygon([(340, 290), (320, 278), (320, 302)], fill=(84, 103, 196))
+
+    for y in (120, 240, 360, 480):
+        draw.line((620, 290, 760, y), fill=(84, 103, 196), width=5)
+        draw.polygon([(760, y), (740, y - 12), (740, y + 12)], fill=(84, 103, 196))
+
+    draw.text((70, 60), "Схема формирования выходного архива после пакетной сортировки", fill=(39, 44, 116))
+    canvas.save(output_path)
+    return output_path
+
+
+def append_intro(document: Document) -> None:
+    add_heading(document, "Введение")
+    intro_paragraphs = [
+        "В организациях любого масштаба значительная часть операционной деятельности связана с обработкой документов. "
+        "Договоры, счета, приказы, служебные записки и отчеты поступают из различных источников, хранятся в разных форматах "
+        "и проходят через множество участников бизнес-процесса. На практике это приводит к накоплению смешанных архивов, "
+        "в которых документы необходимо быстро идентифицировать и разложить по типам.",
+        "Особую сложность представляет одновременная работа с несколькими представлениями одного и того же документа. "
+        "В информационных системах могут присутствовать как текстовые версии файлов, так и сканы, фотографии, выгрузки из "
+        "почты и сжатые архивы, передаваемые между подразделениями. Следовательно, прикладное программное решение должно "
+        "уметь работать не только с чистым текстом, но и с визуальным макетом документа, а также с пакетной обработкой "
+        "массивов файлов.",
+        "В условиях цифровизации документооборота возрастает потребность в компактных сервисах, которые можно быстро "
+        "развернуть локально и встроить в существующий рабочий процесс. Такой сервис должен не только классифицировать "
+        "отдельный документ, но и решать практическую задачу первичной маршрутизации входящего массива файлов: определить "
+        "тип документа, сохранить историю обработки и сформировать аккуратно отсортированный результат для дальнейшей работы.",
+        "Актуальность темы обусловлена сочетанием двух факторов. С одной стороны, машинное обучение предоставляет "
+        "инструменты для классификации текста и изображений без ручного кодирования большого числа правил. С другой стороны, "
+        "low-code средства позволяют быстро реализовать web-интерфейс и превратить исследовательский прототип в реально "
+        "используемое прикладное приложение.",
+        "Целью выпускной квалификационной работы является разработка программной системы интеллектуальной классификации и "
+        "пакетной сортировки документов на языке Python с low-code интерфейсом, REST API и локальной базой данных.",
+        "Для достижения поставленной цели необходимо решить следующие задачи: проанализировать предметную область "
+        "автоматизации документооборота; определить прикладной сценарий пакетной обработки документов; спроектировать "
+        "архитектуру программной системы, структуру базы данных и пользовательские сценарии; реализовать модули "
+        "классификации текста, сканов и ZIP-архивов; разработать интерфейс взаимодействия пользователя с системой; "
+        "выполнить тестирование и оценить результаты работы приложения.",
+        "Объектом исследования являются процессы автоматической классификации и маршрутизации электронных документов. "
+        "Предметом исследования выступают алгоритмы и программные средства, обеспечивающие распознавание типа документа "
+        "по текстовому содержимому, по визуальному макету и по составу пакетного архива.",
+        "Практическая значимость работы заключается в создании локального программного продукта, пригодного для "
+        "использования в роли демонстрационного и учебного стенда, а также в качестве прототипа сервиса первичной сортировки "
+        "корпоративных документов. Система не требует отдельного сервера баз данных, запускается в среде PyCharm и "
+        "воспроизводит полный инженерный контур: данные, модели, интерфейс, тесты, отчеты и документацию.",
+        "Структура выпускной квалификационной работы включает введение, четыре главы основной части, заключение, список "
+        "использованных источников и приложение. В первой главе рассматриваются предметная область, актуальность, цель, "
+        "задачи и существующие аналоги. Во второй главе описываются архитектура разрабатываемого ПО, структура БД и "
+        "диаграммы сценариев. Третья глава посвящена этапам реализации и поэтапному описанию блоков приложения. В "
+        "четвертой главе приводятся результаты тестирования, преимущества и ограничения решения.",
+    ]
+    for text in intro_paragraphs:
+        add_body_paragraph(document, text)
+
+
+def append_chapter_one(document: Document) -> None:
+    document.add_page_break()
+    add_heading(
+        document,
+        "ГЛАВА 1 АНАЛИЗ ПРЕДМЕТНОЙ ОБЛАСТИ И ПОСТАНОВКА ПРАКТИЧЕСКОЙ ЗАДАЧИ",
+    )
+
+    add_heading(document, "Предметная область автоматизации документооборота", STYLE_H2)
+    for text in [
+        "Предметной областью работы является первичная обработка входящих документов внутри организации. "
+        "Под такой обработкой понимается определение типа документа, выбор дальнейшего маршрута и подготовка "
+        "документов к последующей регистрации, согласованию или хранению.",
+        "В реальном документообороте источники данных неоднородны. Пользователь может получить текстовое описание "
+        "документа из электронной почты, скан из МФУ или фотографию с мобильного устройства, а также архив, в котором "
+        "смешаны несколько видов файлов. Следовательно, прикладной сервис должен учитывать как текстовые, так и "
+        "визуальные признаки документов.",
+        "Для решения задачи в рамках ВКР выбран ограниченный, но практически значимый набор классов: договор, счет, "
+        "приказ, служебная записка и отчет. Данные типы часто встречаются в административной, договорной и отчетной "
+        "деятельности организаций, а также хорошо различаются по содержанию и по структуре макета.",
+    ]:
+        add_body_paragraph(document, text)
+
+    add_heading(document, "Актуальность разработки", STYLE_H2)
+    for text in [
+        "Ручная сортировка большого массива документов создает издержки времени и повышает риск ошибок. Сотруднику "
+        "необходимо открыть файл, определить его назначение, выбрать папку хранения и иногда дополнительно проверить "
+        "наличие обязательных реквизитов. При поступлении смешанного архива с десятками файлов такая работа становится "
+        "монотонной и плохо масштабируется.",
+        "Дополнительную проблему создает необходимость быстрой предварительной фильтрации до внедрения полноценной ECM-"
+        "системы. Во многих учебных и пилотных проектах нужен легкий локальный инструмент, который показывает, что "
+        "маршрутизация документов может быть автоматизирована даже без тяжелой инфраструктуры и дорогостоящего внедрения.",
+        "С научной точки зрения интерес представляет объединение нескольких модальностей в едином приложении. "
+        "Текстовая модель опирается на лексические признаки, визуальная модель использует структуру документа, а "
+        "пакетный режим демонстрирует перенос результатов классификации на практический сценарий работы с архивом.",
+    ]:
+        add_body_paragraph(document, text)
+
+    add_heading(document, "Цель и задачи проектирования", STYLE_H2)
+    for text in [
+        "Практическая постановка задачи в данной работе формулируется следующим образом: необходимо разработать "
+        "локальное приложение, которое сможет автоматически отнести отдельный документ или целый архив документов "
+        "к одному из заданных типов и сформировать понятный результат для пользователя.",
+        "В отличие от абстрактной демонстрации мультимодальной классификации, выбранный сценарий имеет прямое "
+        "прикладное назначение. Пользователь получает не только прогноз модели, но и инструмент первичной расфасовки "
+        "документов по категориям, что упрощает последующую передачу файлов в систему электронного документооборота.",
+        "Таким образом, программный продукт должен решать одновременно три класса задач: одиночную классификацию "
+        "текста, одиночную классификацию скана документа и пакетную обработку архива. Каждому из этих сценариев "
+        "необходимо обеспечить журналирование, удобный интерфейс и воспроизводимость результатов.",
+    ]:
+        add_body_paragraph(document, text)
+
+    add_heading(document, "Характерные признаки типов документов", STYLE_H2)
+    for text in [
+        "Договор обычно содержит формализованную вводную часть со сторонами соглашения, предметом договора, порядком "
+        "расчетов, условиями ответственности и блоком подписей. Для данного класса важны термины, связанные с "
+        "обязательствами сторон, сроками и приложениями, а в визуальном представлении часто встречаются симметрично "
+        "расположенные подписи и плотные абзацы текста.",
+        "Счет отличается наличием реквизитов поставщика, табличной части с номенклатурой и суммами, итогового блока "
+        "оплаты и реквизитов для перечисления денежных средств. Для текстовой модели характерны слова 'итого', "
+        "'реквизиты', 'НДС', 'сумма к оплате', а для визуальной модели - крупная таблица и компактный блок итогов.",
+        "Приказ, служебная записка и отчет имеют разные коммуникативные функции. Приказ оформляет управленческое "
+        "распоряжение, служебная записка служит внутренним обращением или обоснованием, а отчет систематизирует "
+        "результаты деятельности и часто содержит таблицы или диаграммы. Наличие такого различия позволяет построить "
+        "обучающие выборки с выразительными текстовыми и визуальными признаками.",
+    ]:
+        add_body_paragraph(document, text)
+
+    add_heading(document, "Риски и последствия ошибочной маршрутизации документов", STYLE_H2)
+    for text in [
+        "Ошибочная маршрутизация документов приводит не только к потерям времени, но и к искажению управленческих "
+        "процессов. Если счет попадает в договорной контур, а приказ ошибочно помещается в архив отчетов, дальнейшая "
+        "обработка документа становится затрудненной и требует ручного поиска причины ошибки.",
+        "На уровне делопроизводства подобные ошибки означают рост нагрузки на сотрудников, появление повторных "
+        "операций и снижение доверия к цифровым инструментам. Именно поэтому даже система предварительной сортировки "
+        "должна быть не просто демонстрационной, а устойчивой и объяснимой для конечного пользователя.",
+        "Разрабатываемое приложение решает эту проблему путем сочетания трех механизмов: автоматической классификации, "
+        "прозрачного показа уверенности модели и ведения истории обработки. Такой набор позволяет не только ускорить "
+        "работу, но и отследить, почему конкретный документ оказался в той или иной категории.",
+    ]:
+        add_body_paragraph(document, text)
+
+    add_heading(document, "Анализ существующих решений", STYLE_H2)
+    for text in [
+        "На рынке корпоративных информационных систем уже существуют зрелые решения, обеспечивающие электронный "
+        "документооборот, маршрутизацию, хранение и согласование документов. Однако такие платформы обычно ориентированы "
+        "на комплексное внедрение и требуют существенной организационной подготовки.",
+        "Для сравнения с разрабатываемым ПО целесообразно рассмотреть ABBYY FlexiCapture, Directum RX, ELMA365 ECM и "
+        "1С:Документооборот. Указанные системы охватывают близкую прикладную область, но решают ее на уровне "
+        "enterprise-платформ с широким набором дополнительных функций.",
+        "Сравнение аналогов показывает, что нишей разрабатываемого продукта является компактный воспроизводимый сервис, "
+        "в котором акцент сделан на задаче классификации и пакетной сортировки документов, а не на полном жизненном "
+        "цикле ECM-системы.",
+    ]:
+        add_body_paragraph(document, text)
+    add_styled_table(document, "Таблица 1.1 - Сравнение аналогов и разрабатываемого решения", build_analogs_table())
+
+    add_heading(document, "Критерии эффективности разрабатываемой системы", STYLE_H2)
+    for text in [
+        "Эффективность разрабатываемой системы в рамках ВКР оценивается по нескольким критериям. Первый критерий - "
+        "корректность отнесения документа к целевому классу. Второй критерий - скорость ответа системы в интерактивном "
+        "режиме. Третий критерий - способность системы без ручного вмешательства сформировать полезный итоговый архив.",
+        "Наряду с этим важны критерии инженерной зрелости: переносимость на другую машину, наличие тестов, "
+        "автоматическая пересборка артефактов и понятная структура проекта. Такие свойства особенно значимы для ВКР, "
+        "поскольку работа должна быть не только исследовательски корректной, но и технически воспроизводимой.",
+        "Следовательно, итоговая оценка решения не ограничивается лишь точностью модели. Полезность приложения "
+        "определяется тем, насколько полно оно закрывает реальный пользовательский сценарий и насколько надежно "
+        "переиспользуется вне исходной среды разработки.",
+    ]:
+        add_body_paragraph(document, text)
+    add_styled_table(document, "Таблица 1.2 - Сопоставление признаков целевых классов документов", build_document_class_features_table())
+
+    add_heading(document, "Практическая и научная ценность работы", STYLE_H2)
+    for text in [
+        "Практическая ценность работы состоит в реализации законченного приложения, которое можно использовать как "
+        "локальный инструмент предварительной маршрутизации документов и как демонстрационный стенд для защиты ВКР. "
+        "Пользователь получает готовый интерфейс, пакетный режим и набор воспроизводимых артефактов.",
+        "Научная ценность выражается в сравнении двух разных способов распознавания типа документа в единой системе: "
+        "по содержимому текста и по структуре визуального макета. Дополнительно исследование показывает, как результаты "
+        "классификации могут быть перенесены в прикладной сценарий сортировки массива документов без ручного вмешательства.",
+    ]:
+        add_body_paragraph(document, text)
+
+    add_heading(document, "Выводы по первой главе", STYLE_H2)
+    for text in [
+        "В первой главе определена предметная область автоматизации входящего документооборота и обоснована актуальность "
+        "создания компактного сервиса для классификации и сортировки документов. Показано, что прикладная задача может "
+        "быть сформулирована как автоматическое распределение отдельных файлов и архивов по типам документов.",
+        "Проведенный анализ аналогов подтвердил, что существующие корпоративные платформы решают широкий круг задач, "
+        "но для учебного и исследовательского проекта целесообразно создать самостоятельное локальное приложение с "
+        "четко ограниченным сценарием, прозрачной архитектурой и воспроизводимой экспериментальной базой.",
+    ]:
+        add_body_paragraph(document, text)
+
+
+def append_chapter_two(document: Document, settings) -> None:
+    document.add_page_break()
+    add_heading(
+        document,
+        "ГЛАВА 2 ПРОЕКТИРОВАНИЕ ПРОГРАММНОГО ОБЕСПЕЧЕНИЯ ДЛЯ КЛАССИФИКАЦИИ И СОРТИРОВКИ ДОКУМЕНТОВ",
+    )
+
+    add_heading(document, "Описание разрабатываемого программного обеспечения", STYLE_H2)
+    for text in [
+        "Разрабатываемое программное обеспечение представляет собой локальное web-приложение на языке Python. "
+        "Система объединяет серверную часть, low-code интерфейс, две модели машинного обучения, локальную базу данных "
+        "и набор генераторов отчетных материалов. Такой состав позволяет воспроизвести полный жизненный цикл "
+        "прикладного ML-сервиса в рамках одного проекта.",
+        "В системе поддерживаются три прикладных сценария. Первый сценарий связан с классификацией текста документа. "
+        "Второй предназначен для работы со сканом или изображением документа. Третий сценарий реализует пакетную "
+        "обработку ZIP-архива и наиболее полно раскрывает практическую полезность приложения, поскольку автоматизирует "
+        "расфасовку смешанного массива файлов по типам документов.",
+        "Результатом работы приложения является не только прогноз по одному документу, но и набор служебных объектов: "
+        "записи в истории, реестр моделей, CSV-сводка пакетной обработки и новый архив, в котором файлы разложены по "
+        "подкаталогам, соответствующим распознанным типам документов.",
+    ]:
+        add_body_paragraph(document, text)
+    add_styled_table(document, "Таблица 2.1 - Функциональные требования к системе", build_functional_requirements_table())
+
+    add_heading(document, "Нефункциональные требования и ограничения", STYLE_H2)
+    for text in [
+        "Помимо функциональности система должна удовлетворять ряду нефункциональных требований. Для учебного и "
+        "исследовательского проекта особенно важны переносимость, отсутствие тяжелой инфраструктуры, наглядность "
+        "результатов и возможность быстрой повторной проверки на другой машине.",
+        "Требование переносимости связано с фактом, что приложение демонстрируется в рамках ВКР и должно открываться "
+        "в типичной среде разработки без отдельной настройки сервера БД, облачной инфраструктуры или внешних хранилищ. "
+        "Именно поэтому выбран локальный стек с SQLite и файловыми артефактами внутри проекта.",
+        "Требование безопасности проявляется в пакетном режиме: архив нельзя извлекать без проверки путей, иначе "
+        "появляется риск записи файлов за пределы рабочего каталога. В реализации предусмотрена валидация путей и "
+        "контроль набора поддерживаемых расширений.",
+    ]:
+        add_body_paragraph(document, text)
+    add_styled_table(document, "Таблица 2.2 - Нефункциональные требования к системе", build_nonfunctional_requirements_table())
+
+    add_heading(document, "Информационные потоки в системе", STYLE_H2)
+    for text in [
+        "Система оперирует несколькими типами информационных потоков. Первый поток связан с пользовательским вводом: "
+        "текстом, изображением или ZIP-архивом. Второй поток состоит из внутренних служебных данных - прогнозов моделей, "
+        "времени обработки, метрик и путей к артефактам. Третий поток представлен выходными материалами, такими как "
+        "CSV-сводка и итоговый архив с разложением по типам документов.",
+        "Разделение потоков важно для проектирования модулей. Пользовательский поток должен быть быстро обработан и "
+        "безопасно валидирован. Служебный поток должен фиксироваться в БД и быть пригодным для анализа. Выходной поток "
+        "должен быть ориентирован на дальнейшую эксплуатацию пользователем или внешней системой.",
+        "Фактически проектируемое ПО связывает пользовательский уровень, алгоритмический уровень и уровень хранения. "
+        "Именно эта связность обеспечивает приложению практический смысл: классификация сразу преобразуется в полезный "
+        "операционный результат, а не остается изолированным числовым ответом модели.",
+    ]:
+        add_body_paragraph(document, text)
+
+    add_heading(document, "Диаграмма прецедентов", STYLE_H2)
+    for text in [
+        "Для формализации пользовательских сценариев была построена диаграмма прецедентов. Она фиксирует, какие действия "
+        "должен поддерживать интерфейс системы и какие результаты ожидаются после выполнения этих действий.",
+        "С точки зрения практического использования наиболее важным прецедентом является пакетная сортировка архива, "
+        "поскольку именно он связывает исследовательскую задачу классификации с реальным прикладным эффектом для "
+        "делопроизводства: быстрым разбором смешанного входящего массива документов.",
+    ]:
+        add_body_paragraph(document, text)
+    add_centered_picture(document, settings.use_case_figure, "Рисунок 2.1 - Диаграмма прецедентов системы", width_inches=6.2)
+
+    add_heading(document, "Архитектура программной системы", STYLE_H2)
+    for text in [
+        "Архитектура приложения построена по модульному принципу. Пользователь взаимодействует с системой через "
+        "low-code web-интерфейс Gradio, который передает запросы в REST API на базе FastAPI. Далее вызовы попадают "
+        "в сервисный слой, где сосредоточена бизнес-логика классификации, журналирования и пакетной сортировки.",
+        "Внутри сервисного слоя используются два независимых алгоритмических контура. Первый контур отвечает за "
+        "классификацию текста документа по TF-IDF признакам и логистической регрессии. Второй контур работает с "
+        "визуальным макетом документа и определяет тип файла по структуре скана с помощью Random Forest.",
+        "Отдельным компонентом выделен архивный модуль. Он отвечает за безопасное извлечение файлов из ZIP, определение "
+        "модальности, запуск нужной модели и формирование выходного архива. Это делает архитектуру расширяемой: при "
+        "необходимости к существующим классам документов можно добавить новые правила маршрутизации и дополнительные "
+        "алгоритмы обработки.",
+    ]:
+        add_body_paragraph(document, text)
+    add_centered_picture(document, settings.architecture_figure, "Рисунок 2.2 - Архитектура разрабатываемой системы", width_inches=6.3)
+
+    add_heading(document, "Состояния документа в рамках сценария обработки", STYLE_H2)
+    for text in [
+        "С точки зрения проектирования полезно рассматривать документ как объект, проходящий через несколько состояний. "
+        "На первом шаге документ находится в необработанном виде: как текст, скан или файл внутри архива. Затем он "
+        "переходит в состояние подготовленного входа, когда для него определена модальность и выбран алгоритмический маршрут.",
+        "После выполнения модели документ получает состояние классифицированного объекта: ему назначается тип, уровень "
+        "уверенности и время обработки. Для пакетного режима далее возникает еще одно состояние - физическое размещение "
+        "файла в новом каталоге внутри выходного архива.",
+        "Явное выделение состояний важно для проектирования БД и API. Каждое состояние порождает собственный набор "
+        "данных для хранения и отображения, а переходы между состояниями определяют состав полей в summary.csv и "
+        "таблицах batch_runs и batch_items.",
+    ]:
+        add_body_paragraph(document, text)
+
+    add_heading(document, "Описание структуры базы данных", STYLE_H2)
+    for text in [
+        "Для хранения эксплуатационной информации выбрана встроенная СУБД SQLite. Такой выбор позволяет избежать "
+        "дополнительного серверного окружения и сделать проект полностью переносимым: база данных располагается внутри "
+        "каталога приложения и инициализируется автоматически при первом запуске.",
+        "Структура БД включает пять сущностей. Пара classification_requests и classification_results описывает одиночные "
+        "прогнозы по текстам и изображениям. Таблица model_registry хранит сведения о версиях моделей и достигнутых "
+        "метриках. Для пакетной обработки выделены сущности batch_runs и batch_items, позволяющие восстановить состав "
+        "архива, результат по каждому файлу и путь к сформированному выходному архиву.",
+        "Использование локальной базы данных решает сразу две задачи. Во-первых, обеспечивается воспроизводимость "
+        "эксперимента и возможность повторного анализа результатов. Во-вторых, интерфейс получает доступ к истории "
+        "запусков без ручного хранения журналов в текстовых файлах.",
+    ]:
+        add_body_paragraph(document, text)
+    add_centered_picture(document, settings.database_figure, "Рисунок 2.3 - Структура базы данных приложения", width_inches=6.25)
+    add_styled_table(document, "Таблица 2.3 - Таблицы и сущности базы данных", build_db_entities_table())
+
+    add_heading(document, "Алгоритм обработки документов и архивов", STYLE_H2)
+    for text in [
+        "Алгоритм работы системы начинается с загрузки пользователем исходных данных. Если передан текст, сервис сразу "
+        "передает его в текстовую модель. Если пользователь загружает скан, изображение нормализуется и преобразуется "
+        "в признаковый вектор фиксированного размера.",
+        "При пакетной обработке архив сначала безопасно распаковывается во временный каталог. Далее для каждого файла "
+        "определяется модальность на основе расширения. Текстовые документы анализируются через извлечение содержимого, "
+        "а изображения направляются в визуальную модель. Неподдерживаемые форматы пропускаются, но также фиксируются "
+        "в сводном отчете с указанием причины пропуска.",
+        "После получения прогнозов система создает новый каталог, где файлы раскладываются по папкам 'Договор', 'Счет', "
+        "'Приказ', 'Служебная записка' и 'Отчет'. Итоговый каталог упаковывается в ZIP-архив, путь к нему заносится "
+        "в историю пакетных запусков, а пользователь получает готовый результат для дальнейшей передачи в делопроизводство.",
+        "С инженерной точки зрения алгоритм пакетной обработки интересен тем, что он связывает файловую подсистему, "
+        "алгоритмы машинного обучения и хранилище истории в единую транзакционную последовательность. Ошибка на любом "
+        "из этапов не должна приводить к потере уже обработанных файлов и должна фиксироваться в итоговой сводке.",
+    ]:
+        add_body_paragraph(document, text)
+    add_centered_picture(document, settings.workflow_figure, "Рисунок 2.4 - Алгоритм обработки документа или архива", width_inches=6.35)
+
+    add_heading(document, "Проектирование формата выходных данных", STYLE_H2)
+    for text in [
+        "Одним из требований к приложению является удобство передачи результата в дальнейший контур документооборота. "
+        "Пользователь не должен вручную копировать найденные файлы или выписывать список прогнозов после пакетного запуска.",
+        "По этой причине результат архивной обработки формируется в двух видах. Первый вид - это summary.csv, содержащий "
+        "сведения по каждому файлу: исходный путь в архиве, модальность, распознанный класс и статус обработки. Второй "
+        "вид - ZIP-архив, в котором документы уже физически разложены по папкам в соответствии с прогнозом системы.",
+        "Такая схема делает результат одновременно машиночитаемым и удобным для пользователя. CSV пригоден для контроля "
+        "качества и последующего анализа, а ZIP-архив можно сразу передавать сотруднику или загружать в следующую систему.",
+    ]:
+        add_body_paragraph(document, text)
+    add_styled_table(document, "Таблица 2.4 - Структура результатов пакетной сортировки", build_archive_structure_table())
+    add_centered_picture(
+        document,
+        build_archive_routing_figure(settings),
+        "Рисунок 2.6 - Формирование итогового архива после пакетной сортировки",
+        width_inches=6.35,
+    )
+
+    add_heading(document, "Взаимодействие интерфейса, API и прикладных модулей", STYLE_H2)
+    for text in [
+        "Коммуникация между интерфейсом и серверной частью осуществляется через внутренние вызовы FastAPI. Такой подход "
+        "обеспечивает единый путь обработки как для web-интерфейса, так и для автотестов, использующих HTTP-маршруты.",
+        "При одиночной классификации пользователь получает компактный ответ: тип документа, уверенность модели, "
+        "время обработки и распределение вероятностей по классам. В пакетном режиме вместо одного прогноза возвращается "
+        "сводка по архиву, таблица результатов и файл с готовым выходным архивом.",
+        "Сервисный слой изолирует UI от деталей реализации моделей и БД. Это решение важно с инженерной точки зрения: "
+        "изменение алгоритма классификации или структуры базы данных не требует полной переработки интерфейса, пока "
+        "сохраняется контракт методов сервисного слоя.",
+    ]:
+        add_body_paragraph(document, text)
+    add_centered_picture(document, settings.interaction_figure, "Рисунок 2.5 - Схема взаимодействия основных компонентов", width_inches=6.25)
+
+    add_heading(document, "Обоснование выбора локальной архитектуры", STYLE_H2)
+    for text in [
+        "Для ВКР можно было бы спроектировать распределенную архитектуру с отдельным frontend, сервером приложений, "
+        "внешней СУБД и объектным хранилищем. Однако такой подход усложнил бы разворачивание и сместил бы акцент работы "
+        "с прикладной задачи классификации на инфраструктурную интеграцию.",
+        "Локальная архитектура позволяет сосредоточиться именно на интеллектуальной составляющей и на прикладной "
+        "ценности решения. Все ключевые элементы - модели, БД, интерфейс и пакетный модуль - находятся внутри одного "
+        "репозитория и могут быть проверены без сетевой инфраструктуры и дополнительных сервисных зависимостей.",
+        "Кроме того, такой подход соответствует сценарию защиты и передачи проекта: приложение можно запустить на "
+        "другой машине, воспроизвести результаты и продемонстрировать пакетную сортировку документов без предварительной "
+        "административной подготовки окружения.",
+    ]:
+        add_body_paragraph(document, text)
+
+    add_heading(document, "Выбор технологий и инструментальных средств", STYLE_H2)
+    for text in [
+        "Для реализации приложения выбран стек Python 3.12, FastAPI, Gradio, scikit-learn, SQLite и python-docx. "
+        "Указанные технологии достаточно зрелы, хорошо документированы и позволяют собрать прикладной сервис без "
+        "избыточной инфраструктурной сложности.",
+        "FastAPI обеспечивает серверные маршруты, схемы запросов и прозрачное тестирование API. Gradio используется как "
+        "low-code средство создания web-интерфейса: он позволяет сосредоточиться на логике обработки документов, а не на "
+        "ручной frontend-разработке. SQLite поддерживает локальный режим работы и хорошо подходит для демонстрационного "
+        "и исследовательского проекта.",
+        "Выбор классических алгоритмов машинного обучения объясняется требованиями к воспроизводимости и скорости. "
+        "Логистическая регрессия на TF-IDF признаках интерпретируема для текстовой задачи, а Random Forest устойчиво "
+        "работает на синтетических визуальных макетах документов и не требует длительного обучения на GPU.",
+    ]:
+        add_body_paragraph(document, text)
+    add_styled_table(document, "Таблица 2.5 - Используемые технологии", build_stack_table())
+
+    add_heading(document, "Выводы по второй главе", STYLE_H2)
+    for text in [
+        "Во второй главе спроектирована архитектура программной системы, определены пользовательские сценарии, структура "
+        "базы данных и состав технологического стека. Особое внимание уделено пакетному сценарию обработки архива как "
+        "ключевому носителю практической ценности работы.",
+        "Построенная архитектура обеспечивает модульность, переносимость и возможность дальнейшего наращивания "
+        "функциональности. На следующем этапе проектирования эти решения переходят в конкретную программную реализацию.",
+    ]:
+        add_body_paragraph(document, text)
+
+
+def append_chapter_three(document: Document, settings, service: ClassifierService) -> None:
+    document.add_page_break()
+    add_heading(
+        document,
+        "ГЛАВА 3 РАЗРАБОТКА ПРОГРАММНОГО ОБЕСПЕЧЕНИЯ И ПОЭТАПНАЯ РЕАЛИЗАЦИЯ БЛОКОВ СИСТЕМЫ",
+    )
+
+    add_heading(document, "Общая организация проекта", STYLE_H2)
+    for text in [
+        "Практическая реализация выполнена в формате самостоятельного Python-проекта, пригодного для открытия в среде "
+        "PyCharm. Внутри репозитория выделены каталоги project и docs: первый содержит исходный код, модели и тесты, "
+        "второй включает пояснительную записку, презентацию и сопроводительные материалы.",
+        "Исходный код разделен на функциональные модули: конфигурация, генерация синтетических данных, обучение моделей, "
+        "обработка архивов, сервисный слой, API, UI и тесты. Такое разбиение снижает связность компонентов и облегчает "
+        "расширение проекта, например добавление новых типов документов или альтернативных моделей.",
+        "Кроме собственно приложения, в проект включены скрипты автоматической сборки артефактов и выпускных материалов. "
+        "За счет этого тезисы пояснительной записки привязаны к фактически полученным метрикам, диаграммам и скриншотам, "
+        "а не являются статическим описанием, оторванным от рабочего кода.",
+    ]:
+        add_body_paragraph(document, text)
+    add_styled_table(document, "Таблица 3.1 - Основные программные модули проекта", build_module_table())
+
+    add_heading(document, "Этап 1. Подготовка целевых классов и синтетических данных", STYLE_H2)
+    for text in [
+        "Первым этапом разработки стала формализация прикладных классов документов и определение их характерных признаков. "
+        "Для текстовой классификации были выделены устойчивые лексические шаблоны, связанные с договорами, счетами, "
+        "приказами, служебными записками и отчетами.",
+        "На основе этих шаблонов был сформирован программно генерируемый корпус текстовых документов. Такой подход "
+        "позволяет контролировать состав классов, изменять количество примеров и воспроизводимо получать набор данных "
+        "без зависимости от внешних архивов, содержащих конфиденциальную информацию.",
+        "Для визуальной классификации реализован генератор макетов документов. Он строит синтетические сканы страниц: "
+        "размещает блоки текста, таблицы, подписи и диаграммы, добавляет шум, размытие и затемнение. В результате "
+        "получается контролируемая учебная выборка, имитирующая разные типы офисных документов.",
+    ]:
+        add_body_paragraph(document, text)
+
+    add_heading(document, "Детализация подготовки текстового корпуса", STYLE_H2)
+    for text in [
+        "При генерации текстового корпуса особое значение имело не простое копирование нескольких шаблонов, а "
+        "вариативность формулировок внутри каждого класса. Для этого были выделены заголовочные конструкции, "
+        "основные смысловые блоки, уточняющие детали и завершающие формулы, которые затем комбинировались между собой.",
+        "Такой подход позволяет сформировать большой набор осмысленных предложений без ручного составления каждой "
+        "строки. Одновременно он сохраняет контроль над семантическими границами классов и снижает риск того, что "
+        "модель выучит случайные, а не предметно значимые слова.",
+        "Дополнительно корпус проектировался так, чтобы тексты оставались похожими на реальные деловые документы. "
+        "Это важно для демонстрации: пользователь должен видеть, что приложение классифицирует не искусственные метки, "
+        "а документоподобные формулировки, близкие к реальной деловой переписке.",
+    ]:
+        add_body_paragraph(document, text)
+
+    add_heading(document, "Этап 2. Реализация текстового классификатора", STYLE_H2)
+    for text in [
+        "Текстовый модуль реализован на основе пайплайна scikit-learn. Сначала текст преобразуется в TF-IDF признаки "
+        "с учетом униграмм и биграмм, после чего вектор признаков передается в модель логистической регрессии. Такой "
+        "подход хорошо подходит для задач тематической и жанровой классификации документов малого и среднего объема.",
+        "При разработке модуля было важно добиться не только высокого качества, но и короткого времени ответа. "
+        "Логистическая регрессия обеспечивает быстрый инференс, а вероятностный вывод позволяет возвращать в интерфейс "
+        "распределение по всем классам, что повышает интерпретируемость результата.",
+        "Обученная текстовая модель сериализуется в файл artifacts/models/text_classifier.joblib и затем подгружается "
+        "при запуске приложения. Это позволяет отделить фазу обучения от эксплуатационного режима и сократить время "
+        "старта сервиса на пользовательской машине.",
+    ]:
+        add_body_paragraph(document, text)
+
+    add_heading(document, "Этап 3. Реализация классификатора сканов документов", STYLE_H2)
+    for text in [
+        "Второй интеллектуальный блок ориентирован на распознавание типа документа по структуре его визуального макета. "
+        "Каждое изображение переводится в оттенки серого, приводится к размеру 48x64 пикселя и разворачивается в "
+        "признаковый вектор. Такое представление позволяет использовать классический алгоритм без сложной нейросетевой "
+        "инфраструктуры.",
+        "В качестве классификатора выбран Random Forest. Он устойчив к шуму в данных, хорошо работает на синтетических "
+        "выборках и позволяет различать характерные макеты документов: счет с табличной областью, приказ с нумерованными "
+        "пунктами, служебную записку с кратким телом и отчет с графическими элементами.",
+        "Подобный подход не претендует на замену современных transformer-моделей обработки документов, однако в рамках "
+        "ВКР он оправдан с инженерной точки зрения: модель легко обучается локально, демонстрирует воспроизводимый "
+        "результат и хорошо объясняет связь между визуальной структурой документа и его типом.",
+    ]:
+        add_body_paragraph(document, text)
+
+    add_heading(document, "Детализация визуального генератора документов", STYLE_H2)
+    for text in [
+        "Генератор визуальных данных строится не вокруг абстрактных геометрических фигур, а вокруг структурных паттернов "
+        "документов. Для счета формируется крупная табличная область и блок итогов, для договора - плотные абзацы и "
+        "парные подписи, для приказа - нумерованные пункты, для отчета - сочетание таблицы и диаграммы.",
+        "После построения макета к изображению добавляются шум, небольшое размытие и градиент затемнения, что имитирует "
+        "типичные артефакты сканирования и фотографирования. Эти искажения важны для того, чтобы модель не зависела "
+        "исключительно от идеального синтетического рисунка страницы.",
+        "В результате формируется компромисс между реалистичностью и контролируемостью набора данных. Для учебного "
+        "проекта такой подход предпочтителен, поскольку позволяет показать полный цикл построения визуального классификатора "
+        "без использования внешних закрытых или слишком объемных датасетов.",
+    ]:
+        add_body_paragraph(document, text)
+    add_centered_picture(
+        document,
+        build_document_samples_overview(settings),
+        "Рисунок 3.1 - Примеры синтетических макетов документов для визуальной модели",
+        width_inches=6.25,
+    )
+
+    add_heading(document, "Этап 4. Реализация подсистемы пакетной сортировки архива", STYLE_H2)
+    for text in [
+        "Наиболее значимый с прикладной точки зрения этап разработки связан с пакетной сортировкой ZIP-архива. "
+        "Именно этот блок превращает проект из демонстратора одиночной классификации в сервис предварительной обработки "
+        "массива документов.",
+        "Подсистема архивной обработки выполняет безопасную распаковку, определяет поддерживаемые форматы, извлекает "
+        "текст из TXT, MD и DOCX, а изображения направляет в визуальную модель. Для каждого файла формируется запись "
+        "со статусом обработки, классом, уверенностью и служебным комментарием.",
+        "После завершения обработки создается новая файловая структура sorted_documents/<тип документа>/..., затем "
+        "она упаковывается в ZIP-архив и возвращается пользователю. Дополнительно сохраняется summary.csv, который "
+        "может быть использован для последующей проверки качества маршрутизации и анализа состава архива.",
+        "В процессе реализации отдельное внимание уделялось поддержке нескольких модальностей внутри одного пакета. "
+        "Это означает, что в одном архиве могут присутствовать как текстовые файлы, так и изображения, и для каждого "
+        "из них система должна корректно выбрать свой алгоритмический маршрут.",
+    ]:
+        add_body_paragraph(document, text)
+    add_styled_table(document, "Таблица 3.3 - Структура выходного архива пакетной сортировки", build_archive_structure_table())
+
+    add_heading(document, "Пооперационный маршрут пакетного запуска", STYLE_H2)
+    for text in [
+        "Пооперационно пакетный запуск состоит из нескольких шагов. Сначала пользователь передает ZIP-архив и сервис "
+        "создает временный рабочий каталог. Затем архив извлекается с контролем путей и проверкой, что ни один элемент "
+        "не выходит за границы допустимой папки извлечения.",
+        "Далее выполняется проход по всем файлам. Для каждого файла определяется модальность и выбирается способ "
+        "обработки: чтение текста, извлечение содержимого из DOCX либо подготовка изображения для визуальной модели. "
+        "После получения прогноза файл копируется в каталог соответствующего класса внутри структуры результата.",
+        "На завершающем шаге формируются summary.csv, ZIP-архив результата и запись в истории пакетных запусков. "
+        "Именно такая детализация делает пакетный режим не вспомогательной функцией, а полноценным прикладным блоком "
+        "с собственной логикой, журналированием и пользовательской ценностью.",
+    ]:
+        add_body_paragraph(document, text)
+
+    add_heading(document, "Этап 5. Реализация слоя хранения и журналирования", STYLE_H2)
+    for text in [
+        "Для обеспечения воспроизводимости эксперимента и наглядности интерфейса в проект встроено локальное "
+        "журналирование. Одиночные запросы и пакетные прогоны фиксируются в SQLite с сохранением времени обработки, "
+        "источника данных и достигнутых метрик модели.",
+        "Отдельного внимания заслуживает реестр моделей. При пересборке артефактов система не накапливает устаревшие "
+        "абсолютные пути, а заменяет записи в model_registry актуальными относительными путями внутри проекта. Это "
+        "было важно для переносимости приложения на другие машины и предотвращения ошибок запуска.",
+        "Наличие полноценного слоя хранения повышает практическую ценность решения: пользователь может не только "
+        "получить текущий прогноз, но и просматривать историю эксплуатации, проверять результаты пакетной сортировки "
+        "и контролировать версии применяемых моделей.",
+    ]:
+        add_body_paragraph(document, text)
+
+    add_heading(document, "Этап 6. Реализация REST API", STYLE_H2)
+    for text in [
+        "API-слой построен на FastAPI и выступает единым внешним контрактом приложения. Через него реализованы "
+        "маршруты проверки готовности сервиса, получения истории и метрик, а также классификации текста, изображений "
+        "и ZIP-архивов.",
+        "Использование pydantic-схем повышает надежность работы API: входные данные валидируются, а ответы имеют "
+        "прогнозируемую структуру. Для файловых маршрутов реализована дополнительная проверка форматов, что важно "
+        "для устойчивой работы пакетного режима.",
+        "API используется не только интерфейсом, но и тестами. Благодаря этому критические пользовательские сценарии "
+        "проверяются на том же уровне абстракции, который видит внешний потребитель приложения.",
+    ]:
+        add_body_paragraph(document, text)
+    add_styled_table(document, "Таблица 3.2 - Основные маршруты REST API", build_api_table())
+
+    add_heading(document, "Организация демонстрационных данных и сценариев показа", STYLE_H2)
+    for text in [
+        "Для защиты ВКР важно не только наличие кода, но и наличие удобного сценария демонстрации. Поэтому проект "
+        "автоматически создает демонстрационные сканы документов и демонстрационный ZIP-архив, в котором собраны "
+        "текстовые и визуальные примеры всех пяти классов.",
+        "Такой набор данных решает сразу две задачи. Во-первых, он делает проверку приложения воспроизводимой: на "
+        "любой машине можно запустить один и тот же архив и получить понятный результат. Во-вторых, он позволяет "
+        "показывать пакетный сценарий без использования внешних конфиденциальных документов.",
+        "Наличие демонстрационного архива также упростило создание автотестов. Пакетный режим проверяется не на "
+        "абстрактных моках, а на реальном ZIP-файле, структура которого воспроизводится средствами самого проекта.",
+    ]:
+        add_body_paragraph(document, text)
+
+    add_heading(document, "Этап 7. Реализация low-code интерфейса", STYLE_H2)
+    for text in [
+        "Интерфейс приложения реализован на Gradio и встроен в серверное приложение по адресу /ui. На главной странице "
+        "выделены три вкладки, соответствующие прикладным сценариям: классификация текста, классификация скана и "
+        "пакетная сортировка архива.",
+        "Для каждой вкладки предусмотрены отдельные элементы ввода и отдельные формы визуализации результата. "
+        "Одиночные сценарии возвращают тип документа и распределение вероятностей по классам. Пакетный сценарий "
+        "возвращает сводную статистику, таблицу по всем файлам и ссылку на сформированный архив результата.",
+        "Правая часть интерфейса используется как информационная панель. В ней отображаются метрики обученных моделей, "
+        "история одиночных запросов и история пакетных прогонов. Такое решение делает интерфейс не только рабочим "
+        "инструментом, но и стендом для демонстрации инженерных результатов проекта.",
+    ]:
+        add_body_paragraph(document, text)
+    add_body_paragraph(
+        document,
+        "Так как интерфейс напрямую связан с API и сервисным слоем, его корректность дополнительно подтверждается "
+        "автотестами маршрутов и ручной функциональной проверкой в рамках главы о тестировании. Для документации и "
+        "защиты основной акцент сделан на диаграммах взаимодействия и итоговых таблицах результатов.",
+    )
+
+    add_heading(document, "Этап 8. Обеспечение переносимости и запуска на другой машине", STYLE_H2)
+    for text in [
+        "Во время разработки отдельной задачей стала переносимость проекта между рабочими машинами. Практика показала, "
+        "что при перемещении репозитория могут появляться ошибки из-за абсолютных путей в базе данных, артефактах или "
+        "скриптах запуска. Поэтому в проекте были устранены machine-specific ссылки и оставлены только относительные пути "
+        "внутри репозитория.",
+        "Дополнительно были добавлены корневые точки входа main.py и generate_assets.py, чтобы пользователь мог запускать "
+        "приложение и пересборку артефактов из корня репозитория без ручного перехода по каталогам. Это упростило как "
+        "демонстрацию, так и разворачивание проекта на другом компьютере.",
+        "Отдельно доработана логика выбора порта: если порт 8000 уже занят, приложение автоматически подбирает следующий "
+        "свободный локальный порт. Такое решение уменьшает количество ошибок запуска при защите, тестировании и переносе "
+        "проекта на новую рабочую станцию.",
+    ]:
+        add_body_paragraph(document, text)
+
+    add_heading(document, "Этап 9. Автоматизация сборки артефактов и выпускных материалов", STYLE_H2)
+    for text in [
+        "В проект включены специальные сценарии пересборки моделей, графиков, диаграмм, пояснительной записки и "
+        "презентации. Такая автоматизация важна для поддержания согласованности между кодом, метриками, скриншотами "
+        "и текстом ВКР.",
+        "Генерация артефактов запускается отдельным скриптом. Если модели уже соответствуют текущей конфигурации, "
+        "повторное обучение не выполняется, что ускоряет старт приложения и исключает лишнюю пересборку данных. "
+        "При изменении состава классов или версии модели артефакты пересоздаются автоматически.",
+        "В результате проект получает свойства инженерно оформленного продукта: пользователь может открыть репозиторий, "
+        "пересобрать модели, прогнать тесты, пересоздать документацию и получить одинаковый результат на другой машине.",
+    ]:
+        add_body_paragraph(document, text)
+
+    add_heading(document, "Выводы по третьей главе", STYLE_H2)
+    for text in [
+        "В третьей главе поэтапно описана реализация всех ключевых блоков системы: от генерации данных и обучения моделей "
+        "до пакетной сортировки архива, REST API, интерфейса и автоматизации сборки артефактов.",
+        "Полученная реализация демонстрирует, что даже компактное локальное приложение может обладать выраженной "
+        "практической полезностью, если результаты классификации непосредственно встроены в прикладной сценарий работы "
+        "с массивом документов.",
+    ]:
+        add_body_paragraph(document, text)
+
+
+def append_chapter_four(document: Document, settings, service: ClassifierService, latency: dict[str, float]) -> None:
+    document.add_page_break()
+    add_heading(
+        document,
+        "ГЛАВА 4 ТЕСТИРОВАНИЕ ПРОГРАММНОГО ОБЕСПЕЧЕНИЯ, АНАЛИЗ РЕЗУЛЬТАТОВ И ОЦЕНКА РЕШЕНИЯ",
+    )
+
     summary = pd.read_csv(settings.summary_metrics_path)
+    summary_prepared = summary.copy()
     for column in ["accuracy", "precision", "recall", "f1_score"]:
-        summary[column] = summary[column].map(lambda value: f"{value:.4f}")
-    summary = summary.rename(
+        summary_prepared[column] = summary_prepared[column].map(lambda value: f"{value:.4f}")
+    summary_prepared = summary_prepared.rename(
         columns={
             "model": "Модель",
             "accuracy": "Accuracy",
@@ -391,10 +1060,24 @@ def build_document() -> Path:
             "f1_score": "F1-score",
         }
     )
-    add_styled_table(document, "Таблица 4.2 - Итоговые метрики качества обученных моделей", summary)
+
+    text_report = pd.read_csv(settings.text_report_path)
+    text_report = text_report[text_report["label"].isin(list(settings.text_labels))].copy()
+    for column in ["precision", "recall", "f1-score"]:
+        text_report[column] = text_report[column].map(lambda value: f"{value:.4f}")
+    text_report["support"] = text_report["support"].map(lambda value: int(value))
+    text_report = text_report.rename(
+        columns={
+            "label": "Класс",
+            "precision": "Precision",
+            "recall": "Recall",
+            "f1-score": "F1-score",
+            "support": "Поддержка",
+        }
+    )
 
     image_report = pd.read_csv(settings.image_report_path)
-    image_report = image_report[image_report["label"].isin(["Круг", "Квадрат", "Треугольник", "Звезда"])].copy()
+    image_report = image_report[image_report["label"].isin(list(settings.image_labels))].copy()
     for column in ["precision", "recall", "f1-score"]:
         image_report[column] = image_report[column].map(lambda value: f"{value:.4f}")
     image_report["support"] = image_report["support"].map(lambda value: int(value))
@@ -407,110 +1090,233 @@ def build_document() -> Path:
             "support": "Поддержка",
         }
     )
-    add_styled_table(document, "Таблица 4.3 - Показатели качества по классам изображений", image_report)
+
+    batch_result = service.classify_archive(settings.demo_archive_path, source_name=settings.demo_archive_path.name)
+
+    add_heading(document, "Организация тестирования и критерии оценки", STYLE_H2)
+    for text in [
+        "Цель тестирования заключалась в проверке работоспособности всех уровней приложения: одиночной классификации "
+        "текста и сканов, пакетной сортировки архива, API-маршрутов, слоя хранения и пользовательского интерфейса.",
+        "Для оценки качества моделей использовались метрики accuracy, precision, recall и F1-score. Дополнительно "
+        "оценивались время ответа после прогрева приложения, корректность формирования выходного архива и сохранение "
+        "истории обработки в локальной базе данных.",
+        "Среднее время обработки текстового документа составило "
+        f"{latency['text_avg']} мс, медианное значение - {latency['text_median']} мс. Для скана документа среднее "
+        f"время обработки составило {latency['image_avg']} мс, медианное - {latency['image_median']} мс. "
+        "Такие значения подтверждают пригодность приложения для интерактивной эксплуатации.",
+    ]:
+        add_body_paragraph(document, text)
+    add_styled_table(document, "Таблица 4.2 - Показатели производительности после прогрева", build_latency_table(latency))
+
+    add_heading(document, "Автоматическое тестирование программного продукта", STYLE_H2)
+    for text in [
+        "Для автоматической проверки проекта реализован набор из шестнадцати тестов на базе pytest. Он покрывает "
+        "сервисный слой, обработку файлов по пути, генерацию артефактов, API-маршруты, пакетную сортировку архива "
+        "и стартовую логику приложения.",
+        "Покрытие исходного кода по результатам запуска pytest --cov превышает 85%, что позволяет считать критические "
+        "сценарии использования приложения надежно зафиксированными тестами. Особенно важным является тестирование "
+        "пакетного режима, поскольку он затрагивает файловую систему, архивирование и множественные вызовы моделей.",
+    ]:
+        add_body_paragraph(document, text)
+    add_styled_table(document, "Таблица 4.1 - Основные сценарии автоматического тестирования", build_test_table())
+
+    add_heading(document, "Результаты оценки качества моделей", STYLE_H2)
+    for text in [
+        "После обучения на синтетических выборках обе модели показали высокие значения точности. Это объясняется тем, "
+        "что набор данных создавался с контролируемыми и отчетливо различимыми признаками, характерными для выбранных "
+        "типов документов.",
+        "Высокие значения accuracy и F1-score в рамках данной работы следует трактовать как подтверждение корректности "
+        "спроектированной архитектуры и стабильности программной реализации, а не как окончательную оценку качества на "
+        "реальном промышленном корпусе документов. Для промышленного внедрения потребовалась бы валидация на живых данных.",
+    ]:
+        add_body_paragraph(document, text)
+    add_styled_table(document, "Таблица 4.3 - Итоговые метрики качества моделей", summary_prepared)
+    add_styled_table(document, "Таблица 4.4 - Показатели качества текстовой модели по классам", text_report)
+    add_styled_table(document, "Таблица 4.5 - Показатели качества модели сканов по классам", image_report)
 
     for figure_path, caption in [
         (settings.model_comparison_figure, "Рисунок 4.1 - Сравнение итоговых метрик качества моделей"),
         (settings.text_confusion_figure, "Рисунок 4.2 - Матрица ошибок текстовой модели"),
-        (settings.image_confusion_figure, "Рисунок 4.3 - Матрица ошибок модели изображений"),
+        (settings.image_confusion_figure, "Рисунок 4.3 - Матрица ошибок модели сканов"),
     ]:
-        paragraph = document.add_paragraph("", style=STYLE_BODY)
-        add_centered_picture(paragraph, figure_path, width_inches=5.9)
-        caption_paragraph = document.add_paragraph(caption, style=STYLE_CAPTION)
-        format_caption(caption_paragraph)
+        add_centered_picture(document, figure_path, caption, width_inches=5.95)
 
-    document.add_paragraph("Преимущества и ограничения разработанного решения", style=STYLE_H2)
-    document.add_paragraph(
-        "К преимуществам разработанного программного продукта относятся компактность архитектуры, отсутствие "
-        "зависимости от внешней СУБД, быстрый локальный запуск, наличие low-code интерфейса и автоматизированное "
-        "формирование отчетных материалов. Пользователь может проверить обе модели в одном приложении без дополнительной настройки.",
-        style=STYLE_BODY,
-    )
-    document.add_paragraph(
-        "С точки зрения инженерной практики сильной стороной проекта является воспроизводимость. Все ключевые "
-        "артефакты - обученные модели, графики, таблицы, скриншоты и пояснительная записка - формируются из одного "
-        "репозитория и могут быть пересобраны повторным запуском скриптов.",
-        style=STYLE_BODY,
-    )
-    document.add_paragraph(
-        "Ограничением текущей версии является использование синтетического набора изображений и программно созданного "
-        "текстового корпуса. Для дальнейшего развития системы целесообразно подключить реальные открытые датасеты, "
-        "добавить сценарии пакетной обработки файлов и расширить перечень поддерживаемых тематических классов.",
-        style=STYLE_BODY,
-    )
-
-    document.add_paragraph("Выводы по четвертой главе", style=STYLE_H2)
-    document.add_paragraph(
-        "Проведенное тестирование подтвердило работоспособность разработанной системы. Автоматические тесты успешно "
-        "проверяют критические сценарии работы приложения, а итоговые метрики качества показывают пригодность "
-        "системы для демонстрации и последующего развития.",
-        style=STYLE_BODY,
-    )
-
-    document.add_page_break()
-    document.add_paragraph("Заключение", style=STYLE_H1)
+    add_heading(document, "Результаты пакетной сортировки демонстрационного архива", STYLE_H2)
     for text in [
-        "В ходе выполнения выпускной квалификационной работы была разработана программная система классификации изображений "
-        "и текстовых данных на языке Python с web-интерфейсом, реализованным на low-code платформе Gradio.",
-        "В первой части работы была рассмотрена предметная область, проанализированы методы классификации данных, "
-        "современные технологии машинного обучения и существующие решения. Во второй части выполнено проектирование "
-        "архитектуры приложения, диаграммы вариантов использования и структуры базы данных.",
-        "Практический результат работы представляет собой готовое приложение, включающее FastAPI API, low-code интерфейс, "
-        "две модели машинного обучения, журнал истории запросов и набор автотестов. Система успешно проходит проверку "
-        "и может использоваться как демонстрационный образец мультимодальной классификации данных.",
-        "Проведенная экспериментальная оценка показала, что текстовая модель достигает accuracy 1.0000, а модель "
-        "изображений - 0.9583. Таким образом, поставленная цель ВКР достигнута, а разработанная система обладает "
-        "практической ценностью и может служить основой для дальнейшего развития проекта.",
+        "Для оценки прикладного сценария был использован демонстрационный ZIP-архив, автоматически сформированный из "
+        "пяти текстовых и пяти визуальных документов. Архив содержит по два экземпляра каждого класса: текстовый и "
+        "графический вариант документа.",
+        "Пакетная обработка завершилась созданием итогового архива с разложением файлов по каталогам. Таким образом, "
+        "приложение подтвердило способность не только классифицировать отдельные документы, но и решать прикладную "
+        "задачу расфасовки смешанного архива по типам документов.",
     ]:
-        document.add_paragraph(text, style=STYLE_BODY)
+        add_body_paragraph(document, text)
+    add_styled_table(document, "Таблица 4.6 - Распределение файлов по типам документов в демо-архиве", build_batch_summary_table(batch_result))
+    add_styled_table(document, "Таблица 4.7 - Фрагмент сводки по файлам демо-архива", build_batch_items_table(batch_result))
 
+    add_heading(document, "Оценка производительности и устойчивости", STYLE_H2)
+    for text in [
+        "Даже при наличии трех разных пользовательских сценариев система остается отзывчивой в локальном режиме. "
+        "Это достигается за счет предварительной инициализации моделей, повторного использования артефактов и отказа "
+        "от лишней пересборки данных, если конфигурация проекта не менялась.",
+        "Пакетный режим устойчив к неоднородному составу архива. Неподдерживаемые файлы не приводят к аварийному "
+        "завершению процесса, а помечаются как пропущенные с комментарием. Такой подход важен для реального делопроизводства, "
+        "где входящие архивы могут содержать служебные файлы, превью или вложения непредусмотренных форматов.",
+        "С точки зрения надежности дополнительно важна корректная работа после переноса проекта на другую машину. "
+        "Использование относительных путей к артефактам, локальной базы данных и автоподбора порта существенно снижает "
+        "риск ошибки запуска и делает решение пригодным для повторной демонстрации в новой среде.",
+    ]:
+        add_body_paragraph(document, text)
+
+    add_heading(document, "Интерпретация результатов по классам документов", STYLE_H2)
+    for text in [
+        "Высокие метрики по каждому классу показывают, что выбранные признаки действительно отражают структуру "
+        "документов. Для текстовой модели решающую роль играют устойчивые деловые формулировки, характерные для "
+        "договоров, счетов, приказов, служебных записок и отчетов.",
+        "Для визуальной модели различимость достигается за счет макетных особенностей: наличие или отсутствие таблиц, "
+        "компоновка абзацев, зона подписей и графические элементы отчета. Такой результат подтверждает гипотезу о том, "
+        "что даже без OCR структура страницы уже содержит значимую информацию о типе документа.",
+        "Следовательно, в рамках ВКР достигнут не только программный, но и методический результат: показано, что "
+        "прикладная задача маршрутизации документов может решаться как по семантическим, так и по визуальным признакам, "
+        "а объединение этих подходов внутри одного приложения повышает его практическую выразительность.",
+    ]:
+        add_body_paragraph(document, text)
+
+    add_heading(document, "Преимущества и недостатки разработанного решения", STYLE_H2)
+    for text in [
+        "К основным преимуществам приложения относятся локальный режим работы, отсутствие внешней СУБД, наличие "
+        "low-code интерфейса, воспроизводимая генерация артефактов и практический пакетный сценарий обработки архивов. "
+        "Пользователь получает законченный цикл от загрузки документа до формирования нового отсортированного архива.",
+        "С инженерной точки зрения сильной стороной решения является согласованность компонентов. Код, тесты, модели, "
+        "диаграммы, таблицы метрик, пояснительная записка и презентация формируются из одного репозитория, что "
+        "упрощает сопровождение и защиту проекта.",
+        "К недостаткам текущей версии следует отнести использование синтетических обучающих данных и ограниченный "
+        "набор поддерживаемых типов документов. Кроме того, модель визуальной классификации пока не анализирует "
+        "содержимое документа на уровне OCR, а опирается только на геометрию макета.",
+        "Перспективным направлением развития является подключение реальных корпусов документов, расширение перечня "
+        "типов файлов, добавление OCR и использование более сложных мультимодальных моделей. Однако для целей ВКР "
+        "текущая реализация уже демонстрирует законченный прикладной эффект и инженерную состоятельность.",
+        "Для опытной эксплуатации в организации система могла бы использоваться как предобработчик входящей корреспонденции "
+        "или как вспомогательный инструмент сотрудника делопроизводства. Даже если окончательное решение по документу "
+        "принимает человек, предварительная сортировка по типам уже экономит время и снижает вероятность ошибок маршрутизации.",
+    ]:
+        add_body_paragraph(document, text)
+
+    add_heading(document, "Оценка сценариев практического применения", STYLE_H2)
+    for text in [
+        "Первым возможным сценарием применения является предварительный разбор входящего почтового архива подразделения. "
+        "Сотрудник может выгрузить полученные за день файлы, запустить пакетную сортировку и сразу получить разложение "
+        "по типам документов, пригодное для дальнейшей ручной проверки и распределения.",
+        "Второй сценарий связан с учебными и исследовательскими лабораториями. Приложение можно использовать как "
+        "демонстрационный стенд, показывающий полный контур прикладного ML-проекта: генерацию данных, обучение моделей, "
+        "публикацию API, пакетную обработку архива и контроль качества через тесты.",
+        "Третий сценарий состоит в использовании проекта как заготовки для последующего расширения. На его основе "
+        "можно подключить OCR, реальные корпоративные данные, дополнительные типы документов и более сложные модели, "
+        "не разрушая уже реализованную архитектуру и накопленный слой тестов.",
+    ]:
+        add_body_paragraph(document, text)
+
+    add_heading(document, "Выводы по четвертой главе", STYLE_H2)
+    for text in [
+        "Тестирование подтвердило работоспособность разработанного программного продукта. Автоматические тесты "
+        "проверяют критические сценарии, а итоговые таблицы и графики демонстрируют высокое качество моделей на "
+        "сформированных выборках и корректную работу пакетного режима.",
+        "Полученные результаты позволяют считать цель ВКР достигнутой: приложение решает практическую задачу "
+        "классификации и первичной сортировки документов, обладает воспроизводимой архитектурой и готово к демонстрации.",
+    ]:
+        add_body_paragraph(document, text)
+
+
+def append_conclusion(document: Document) -> None:
     document.add_page_break()
-    document.add_paragraph("Список использованных источников", style=STYLE_H1)
+    add_heading(document, "Заключение")
+    for text in [
+        "В ходе выполнения выпускной квалификационной работы была разработана программная система интеллектуальной "
+        "классификации и пакетной сортировки документов на языке Python с web-интерфейсом, реализованным на low-code "
+        "платформе Gradio, и серверной частью на FastAPI.",
+        "В работе была уточнена практическая постановка задачи: вместо абстрактной демонстрации мультимодальной "
+        "классификации сформирован прикладной сценарий первичной маршрутизации документов. Приложение умеет определять "
+        "тип отдельного документа по тексту и по скану, а также обрабатывать ZIP-архив и раскладывать файлы по "
+        "каталогам в соответствии с их типами.",
+        "В первой главе проанализирована предметная область документооборота, обоснована актуальность темы и проведено "
+        "сравнение с существующими решениями. Во второй главе спроектированы архитектура приложения, структура базы "
+        "данных и пользовательские сценарии. В третьей главе реализованы программные блоки, обеспечивающие обучение "
+        "моделей, обработку архивов, работу API и интерфейса. В четвертой главе выполнено тестирование и анализ результатов.",
+        "Практический результат работы представляет собой готовое локальное приложение, которое запускается без внешней "
+        "инфраструктуры, проходит автоматическое тестирование, хранит историю обработки и формирует комплект отчетных "
+        "материалов. Разработанная система обладает выраженной практической ценностью и может служить как демонстрационным "
+        "стендом, так и основой для дальнейшего развития в сторону промышленной обработки документов.",
+    ]:
+        add_body_paragraph(document, text)
+
+
+def append_sources(document: Document) -> None:
+    document.add_page_break()
+    add_heading(document, "Список использованных источников")
     bibliography = [
-        "1. Python Software Foundation. Python 3.12 documentation [Электронный ресурс]. URL: https://docs.python.org/3/ (дата обращения: 10.04.2026).",
+        f"1. Python Software Foundation. Python documentation [Электронный ресурс]. URL: https://docs.python.org/3/ (дата обращения: {ACCESS_DATE}).",
         "2. Ramalho L. Fluent Python. 2nd ed. Sebastopol: O'Reilly Media, 2022. 1014 p.",
         "3. Géron A. Hands-On Machine Learning with Scikit-Learn, Keras, and TensorFlow. 3rd ed. Sebastopol: O'Reilly Media, 2022. 851 p.",
-        "4. FastAPI. Documentation [Электронный ресурс]. URL: https://fastapi.tiangolo.com/ (дата обращения: 10.04.2026).",
-        "5. Gradio. Documentation [Электронный ресурс]. URL: https://www.gradio.app/docs (дата обращения: 10.04.2026).",
-        "6. Scikit-learn. User Guide [Электронный ресурс]. URL: https://scikit-learn.org/stable/user_guide.html (дата обращения: 10.04.2026).",
-        "7. SQLite Documentation [Электронный ресурс]. URL: https://sqlite.org/docs.html (дата обращения: 10.04.2026).",
-        "8. pytest Documentation [Электронный ресурс]. URL: https://docs.pytest.org/en/stable/ (дата обращения: 10.04.2026).",
-        "9. Goodfellow I., Bengio Y., Courville A. Deep Learning. Cambridge: MIT Press, 2016. 800 p.",
-        "10. Bishop C. M. Pattern Recognition and Machine Learning. New York: Springer, 2006. 738 p.",
-        "11. Jurafsky D., Martin J. H. Speech and Language Processing. 3rd ed. draft [Электронный ресурс]. URL: https://web.stanford.edu/~jurafsky/slp3/ (дата обращения: 10.04.2026).",
-        "12. Han J., Kamber M., Pei J. Data Mining: Concepts and Techniques. 3rd ed. Waltham: Morgan Kaufmann, 2011. 744 p.",
+        f"4. FastAPI Documentation [Электронный ресурс]. URL: https://fastapi.tiangolo.com/ (дата обращения: {ACCESS_DATE}).",
+        f"5. Gradio Documentation [Электронный ресурс]. URL: https://www.gradio.app/docs (дата обращения: {ACCESS_DATE}).",
+        f"6. Scikit-learn User Guide [Электронный ресурс]. URL: https://scikit-learn.org/stable/user_guide.html (дата обращения: {ACCESS_DATE}).",
+        f"7. SQLite Documentation [Электронный ресурс]. URL: https://sqlite.org/docs.html (дата обращения: {ACCESS_DATE}).",
+        f"8. python-docx Documentation [Электронный ресурс]. URL: https://python-docx.readthedocs.io/ (дата обращения: {ACCESS_DATE}).",
+        f"9. pytest Documentation [Электронный ресурс]. URL: https://docs.pytest.org/en/stable/ (дата обращения: {ACCESS_DATE}).",
+        "10. Goodfellow I., Bengio Y., Courville A. Deep Learning. Cambridge: MIT Press, 2016. 800 p.",
+        "11. Bishop C. M. Pattern Recognition and Machine Learning. New York: Springer, 2006. 738 p.",
+        f"12. ABBYY FlexiCapture [Электронный ресурс]. URL: https://www.abbyy.com/flexicapture/ (дата обращения: {ACCESS_DATE}).",
+        f"13. Directum RX. Управление документами [Электронный ресурс]. URL: https://www.directum.ru/solution/rx_document_management (дата обращения: {ACCESS_DATE}).",
+        f"14. ELMA365 ECM [Электронный ресурс]. URL: https://elma365.com/ru/products/ecm/enterprise-content-management/ (дата обращения: {ACCESS_DATE}).",
+        f"15. 1С:Документооборот [Электронный ресурс]. URL: https://v8.1c.ru/doc8/ (дата обращения: {ACCESS_DATE}).",
     ]
     for item in bibliography:
-        document.add_paragraph(item, style=STYLE_BODY)
+        add_body_paragraph(document, item)
 
+
+def append_appendix(document: Document, settings) -> None:
     document.add_page_break()
-    document.add_paragraph("Приложение А", style=STYLE_H1)
-    document.add_paragraph("Структура проекта и инструкция по запуску", style=STYLE_H2)
+    add_heading(document, "Приложение А")
+    add_heading(document, "Структура проекта и инструкция по запуску", STYLE_H2)
     for text in [
-        "В состав проекта входят: каталог src с исходным кодом приложения, каталог tests с автотестами, каталог "
-        "artifacts с обученными моделями, графиками и скриншотами, а также файлы main.py и generate_assets.py для запуска приложения и пересборки артефактов.",
-        "Для запуска приложения из каталога проекта используется команда python main.py. Веб-интерфейс становится доступным по адресу http://127.0.0.1:8000/ui.",
-        "Для повторной генерации моделей, таблиц и графиков используется команда python generate_assets.py.",
-        "Для запуска набора автотестов применяется команда python -m pytest --cov=vkr_classifier --cov-report=term-missing.",
+        "Проект состоит из прикладной части project и комплекта выпускных материалов docs. В папке project расположен "
+        "исходный код, тесты, локальная база данных и артефакты моделей. В папке docs находятся пояснительная записка, "
+        "презентация и вспомогательные текстовые материалы.",
+        "Для запуска приложения из корня проекта используется команда python main.py либо запуск файла project/main.py. "
+        "Web-интерфейс становится доступным по адресу http://127.0.0.1:8000/ui или на следующем свободном порту, если "
+        "порт 8000 уже занят.",
+        "Для пересборки моделей, графиков, диаграмм и демонстрационного архива используется команда python generate_assets.py. "
+        "Для запуска автотестов применяется команда python -m pytest --cov=project/vkr_classifier --cov-report=term-missing project/tests.",
+        f"Демонстрационный архив для пакетной сортировки формируется автоматически и располагается по пути "
+        f"{settings.demo_archive_path.relative_to(settings.project_root).as_posix()}.",
     ]:
-        document.add_paragraph(text, style=STYLE_BODY)
+        add_body_paragraph(document, text)
+    add_styled_table(document, "Таблица А.1 - Основные элементы структуры проекта", build_project_structure_table())
 
-    structure_table = pd.DataFrame(
-        [
-            ["vkr_classifier", "основные модули приложения"],
-            ["tests", "автоматические тесты"],
-            ["artifacts/models", "сериализованные модели"],
-            ["artifacts/figures", "диаграммы и графики"],
-            ["artifacts/screenshots", "скриншоты интерфейса"],
-            ["classifier_history.sqlite3", "локальная база данных истории запросов"],
-        ],
-        columns=["Элемент проекта", "Назначение"],
-    )
-    add_styled_table(document, "Таблица А.1 - Основные элементы структуры проекта", structure_table)
+
+def build_document() -> Path:
+    settings = get_settings(PROJECT_DIR)
+    service = ClassifierService(settings)
+    service.ensure_ready()
+    latency = measure_latency(service)
+
+    document = Document(DOCS_DIR / SOURCE_NAME)
+    clear_document_paragraphs(document)
+
+    append_intro(document)
+    append_chapter_one(document)
+    append_chapter_two(document, settings)
+    append_chapter_three(document, settings, service)
+    append_chapter_four(document, settings, service, latency)
+    append_conclusion(document)
+    append_sources(document)
+    append_appendix(document, settings)
 
     for paragraph in document.paragraphs:
         if paragraph.style and paragraph.style.name == STYLE_CAPTION:
             format_caption(paragraph)
+        elif paragraph.style and paragraph.style.name == STYLE_BODY:
+            format_paragraph_runs(paragraph, font_name="Times New Roman", font_size=14)
 
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
     output_path = DOCS_DIR / OUTPUT_NAME

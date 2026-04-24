@@ -10,18 +10,20 @@ class Settings:
     host: str = "127.0.0.1"
     port: int = 8000
     random_seed: int = 42
-    image_size: tuple[int, int] = (32, 32)
-    text_labels: tuple[str, ...] = ("Спорт", "Технологии", "Финансы", "Культура")
-    image_labels: tuple[str, ...] = ("Круг", "Квадрат", "Треугольник", "Звезда")
-    text_model_name: str = "TF-IDF + Logistic Regression"
-    image_model_name: str = "KNN Shape Classifier"
-    text_model_version: str = "1.0.0"
-    image_model_version: str = "1.0.0"
+    image_size: tuple[int, int] = (48, 64)
+    text_labels: tuple[str, ...] = ("Договор", "Счет", "Приказ", "Служебная записка", "Отчет")
+    image_labels: tuple[str, ...] = ("Договор", "Счет", "Приказ", "Служебная записка", "Отчет")
+    text_model_name: str = "TF-IDF + Logistic Regression Document Classifier"
+    image_model_name: str = "Random Forest Document Layout Classifier"
+    text_model_version: str = "2.0.0"
+    image_model_version: str = "2.0.0"
     artifacts_dir: Path = field(init=False)
     models_dir: Path = field(init=False)
     tables_dir: Path = field(init=False)
     figures_dir: Path = field(init=False)
     screenshots_dir: Path = field(init=False)
+    batch_reports_dir: Path = field(init=False)
+    batch_exports_dir: Path = field(init=False)
     database_path: Path = field(init=False)
     text_model_path: Path = field(init=False)
     image_model_path: Path = field(init=False)
@@ -39,6 +41,7 @@ class Settings:
     workflow_figure: Path = field(init=False)
     interaction_figure: Path = field(init=False)
     demo_examples_dir: Path = field(init=False)
+    demo_archive_path: Path = field(init=False)
 
     def __post_init__(self) -> None:
         self.project_root = Path(self.project_root)
@@ -47,7 +50,10 @@ class Settings:
         self.tables_dir = self.artifacts_dir / "tables"
         self.figures_dir = self.artifacts_dir / "figures"
         self.screenshots_dir = self.artifacts_dir / "screenshots"
+        self.batch_reports_dir = self.artifacts_dir / "batch_reports"
+        self.batch_exports_dir = self.artifacts_dir / "batch_exports"
         self.demo_examples_dir = self.artifacts_dir / "demo_examples"
+        self.demo_archive_path = self.batch_exports_dir / "demo_document_archive.zip"
         self.database_path = self.project_root / "classifier_history.sqlite3"
         self.text_model_path = self.models_dir / "text_classifier.joblib"
         self.image_model_path = self.models_dir / "image_classifier.joblib"
@@ -72,6 +78,8 @@ class Settings:
             self.tables_dir,
             self.figures_dir,
             self.screenshots_dir,
+            self.batch_reports_dir,
+            self.batch_exports_dir,
             self.demo_examples_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
